@@ -1,0 +1,32 @@
+[tool.poetry]
+name = "cohesion-analysis"
+version = "1.0.0"
+description = "BERT based Japanese cohesion analyser"
+authors = ["Nobuhiro Ueda <ueda@nlp.ist.i.kyoto-u.ac.jp>"]
+license = "MIT"
+
+[tool.poetry.dependencies]
+python = "^3.7.2"
+torch = "1.6.0"
+transformers = "2.10"
+pyknp = "^0.4"
+textformatting = { git = "https://github.com/ku-nlp/python-textformatting.git", branch = "master" }
+kyoto-reader = { git = "https://github.com/ku-nlp/kyoto-reader.git", branch = "master" }
+numpy = "^1.18"
+tqdm = "^4.43"
+flask = "^1.1"
+scikit-learn = "^0.23"
+jaconv = "^0.2"
+tensorboard = "^2.2"
+pandas = "^1.0"
+ordered-set = "^4.0"
+
+[tool.poetry.dev-dependencies]
+ipython = "^7.12"
+ipdb = "*"
+pytest = "^6.1"
+jupyterlab = "^2.2"
+
+[build-system]
+requires = ["poetry>=0.12"]
+build-backend = "poetry.masonry.api"

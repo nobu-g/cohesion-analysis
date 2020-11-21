@@ -70,8 +70,11 @@ For details, see `src/analyzer/config.example.ini`
 
 ## Analyze a Large Number of Documents
 
-Given raw sentences, first you need to apply (BERT)KNP to them and split into documents.
-Then, run `predict.py` specifying the document directory.
+Given raw sentences, first you need to apply KNP to them and create `.knp` files.
+Then, run `predict.py` specifying the directory where created `.knp` files exist in the option `--knp-dir`.
+When the analysis finishes, `.knp` files with `<rel >` and `<述語項構造:>` tags are exported to the directory
+specified in `--export-dir` option.
+To utilize this result, I recommend you to use [kyoto-reader](https://github.com/ku-nlp/kyoto-reader).
 
 ```zsh
 python src/predict.py \
@@ -80,7 +83,11 @@ python src/predict.py \
 --export-dir path/to/export/directory
 ```
 
-For details, see Makefile [here](https://bitbucket.org/ku_nlp/causal-graph/src/master/scripts/knp_and_pas/Makefile)
+Note: \
+Each .knp file, which KNP created, contains a line indicating the sentence id of the following lines: `# S-ID:***`.
+This project regard S-ID without its tail as the document id.
+For example, the document id of a sentence whose S-ID is `w201106-0000060050-1` is `w201106-0000060050`.
+Sentences that have the same document ids are analyzed as a single document.
 
 ## Training Your Model
 

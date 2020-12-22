@@ -254,7 +254,7 @@ make test-ens GPUS=<gpu-ids> RESULT=/path/to/result/dir
 
 ## Reference
 
-BERT-based Cohesion Analysis of Japanese Texts [Ueda+, COLING2020]
+[BERT-based Cohesion Analysis of Japanese Texts](https://www.aclweb.org/anthology/2020.coling-main.114/) [Ueda+, COLING2020]
 
 ## Licence
 

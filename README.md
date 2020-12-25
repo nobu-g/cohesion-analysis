@@ -20,9 +20,9 @@ For more information, please refer to [the original paper](#reference)
 
 ## Demo
 
-<https://lotus.kuee.kyoto-u.ac.jp/~ueda/demo/bert-pas-analysis-demo/index.cgi>
+<https://lotus.kuee.kyoto-u.ac.jp/~ueda/demo/cohesion-analysis-demo/public/>
 
-<img width="1440" alt="demo screenshot" src="https://user-images.githubusercontent.com/25974220/73454841-3f180580-43b2-11ea-8251-f7e90e6db743.png">
+<img width="910" alt="demo-view" src="https://user-images.githubusercontent.com/25974220/103130065-7e43f900-46de-11eb-8d26-6226e498b6d0.png">
 
 ## Requirements
 

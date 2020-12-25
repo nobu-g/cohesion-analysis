@@ -4,7 +4,7 @@ BERT based Japanese cohesion analyzer.
 
 ## Description
 
-This project performs the following analyses in a multi-task manner:
+This project provides a system to perform the following analyses in a multi-task manner:
 - Verbal Predicate argument structure Analysis (VPA)
 - Nominal Predicate argument structure Analysis (NPA)
 - Bridging Anaphora Resolution (BAR)

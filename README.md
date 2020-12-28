@@ -39,9 +39,11 @@ Use [poetry](https://github.com/python-poetry/poetry)
 ## Quick Start
 
 ```zsh
-MODEL=/path/to/trained/checkpoint
+$ wget https://lotus.kuee.kyoto-u.ac.jp/~ueda/dist/cohesion_analysis_model.tar.gz  # trained checkpoint
+$ tar xvzf cohesion_analysis_model.tar.gz  # make sure that the extracted directory is located at the root directory of this project
+$ MODEL=cohesion_analysis_model/model_best.pth
 
-python src/predict.py \
+$ python src/predict.py \
 --model $MODEL \
 --input "太郎はパンを買って食べた。"
 ```
@@ -49,10 +51,10 @@ python src/predict.py \
 Result:
 
 ```text
-太郎Cはp──┐
-  パンnをp┐│
-     買ってv┤  太郎:ガ パン:ヲ :ニ :ガ２ :ノ
-    食べたv。*  太郎:ガ パン:ヲ :ニ :ガ２ :ノ
+太郎は──┐
+  パンを┐│
+    買って┤  太郎:ガ パン:ヲ :ニ :ガ２
+    食べた。  太郎:ガ パン:ヲ :ニ :ガ２
 ```
 
 Options:
@@ -258,7 +260,8 @@ make test-ens GPUS=<gpu-ids> RESULT=/path/to/result/dir
 
 ## Licence
 
-MIT
+- This project: MIT
+- [NICT BERT](https://alaginrc.nict.go.jp/nict-bert/index.html) (included in the trained model): [Creative Commons license 4.0 (CC BY 4.0)](https://creativecommons.org/licenses/by/4.0/deed.ja)
 
 ## Author
 

@@ -501,25 +501,19 @@ test = ["pytest", "requests"]
 
 [[package]]
 name = "kyoto-reader"
-version = "1.2.0"
+version = "1.3.3"
 description = "A KWDLC and KyotoCorpus parser"
 category = "main"
 optional = false
 python-versions = "!=3.7.0,!=3.7.1,>=3.7"
-develop = false
 
 [package.dependencies]
 jaconv = "*"
+joblib = "*"
 pyknp = "*"
 
 [package.extras]
 testing = ["pytest"]
-
-[package.source]
-type = "git"
-url = "https://github.com/ku-nlp/kyoto-reader.git"
-reference = "e4aa80dfbb5c679e9e23e4944e3176a4b520f0f0"
-resolved_reference = "e4aa80dfbb5c679e9e23e4944e3176a4b520f0f0"
 
 [[package]]
 name = "markdown"
@@ -1287,7 +1281,7 @@ testing = ["pytest (>=3.5,!=3.7.3)", "pytest-checkdocs (>=1.2.3)", "pytest-flake
 [metadata]
 lock-version = "1.1"
 python-versions = "^3.7.2"
-content-hash = "2480bff4aefd9dd360dea3a19aa5737d304eb187c524013df12c7de7f38c7226"
+content-hash = "2f18b8f0492740e9b7f44d27140defc404762d466a6211a713c96036f50f4c41"
 
 [metadata.files]
 absl-py = [
@@ -1545,7 +1539,9 @@ jupyterlab-server = [
     {file = "jupyterlab_server-1.2.0-py3-none-any.whl", hash = "sha256:55d256077bf13e5bc9e8fbd5aac51bef82f6315111cec6b712b9a5ededbba924"},
     {file = "jupyterlab_server-1.2.0.tar.gz", hash = "sha256:5431d9dde96659364b7cc877693d5d21e7b80cea7ae3959ecc2b87518e5f5d8c"},
 ]
-kyoto-reader = []
+kyoto-reader = [
+    {file = "kyoto-reader-1.3.3.zip", hash = "sha256:2ca968f63fbf61d7b6657f8385a77e671e6ee1b2cebbc2398686e1124de7cfb2"},
+]
 markdown = [
     {file = "Markdown-3.3.3-py3-none-any.whl", hash = "sha256:c109c15b7dc20a9ac454c9e6025927d44460b85bd039da028d85e2b6d0bcc328"},
     {file = "Markdown-3.3.3.tar.gz", hash = "sha256:5d9f2b5ca24bc4c7a390d22323ca4bad200368612b5aaa7796babf971d2b2f18"},

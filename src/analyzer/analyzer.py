@@ -6,11 +6,10 @@ import configparser
 from pathlib import Path
 from datetime import datetime
 import shutil
-from logging import Logger
+from logging import Logger, getLogger
 
 import jaconv
 from pyknp import Juman, KNP
-from transformers import BertConfig
 from textformatting import ssplit
 
 import model.model as module_arch
@@ -18,13 +17,16 @@ import data_loader.dataset as module_dataset
 import data_loader.data_loaders as module_loader
 from data_loader.dataset import PASDataset
 from utils.parse_config import ConfigParser
-from test import Inference
+from prediction.inference import Inference
 
 
 class Analyzer:
     """Perform PAS analysis given a sentence."""
 
-    def __init__(self, config: ConfigParser, logger: Logger, remote_knp: bool = False):
+    def __init__(self,
+                 config: ConfigParser,
+                 logger: Logger = None,
+                 remote_knp: bool = False):
         cfg = configparser.ConfigParser()
         here = Path(__file__).parent
         cfg.read(here / 'config.ini')
@@ -41,27 +43,25 @@ class Analyzer:
         self.knp_case_option = section.get('knp_case_option', '-tab -disable-segmentation-modification -case2')
         self.pos_map, self.pos_map_inv = self._read_pos_list(section.get('pos_list', here / 'pos.list'))
         self.config = config
-        self.logger = logger
-        self.remote_knp = remote_knp
+        self.logger: Logger = logger or getLogger(__name__)
+        self.remote_knp: bool = remote_knp
         msg = 'You enabled remote_knp option, but no knp_host or knp_port are specified in the default section of ' \
               'src/analyzer/config.ini'
         assert not remote_knp or (self.knp_host and self.knp_port), msg
 
         os.environ['BPA_DISABLE_CACHE'] = '1'
 
-        dataset_args = self.config['test_kwdlc_dataset']['args']
-        bert_config = BertConfig.from_pretrained(dataset_args['dataset_config']['bert_path'])
-        coreference = dataset_args['coreference']
-        exophors = dataset_args['exophors']
-        expanded_vocab_size = bert_config.vocab_size + len(exophors) + 1 + int(coreference)
-
         # build model architecture
-        model = self.config.init_obj('arch', module_arch, vocab_size=expanded_vocab_size)
+        model = self.config.init_obj('arch', module_arch)
         self.logger.info(model)
 
         self.inference = Inference(self.config, model, logger=self.logger)
 
-    def analyze(self, source: Union[Path, str], knp_dir: Optional[str] = None) -> Tuple[list, PASDataset]:
+    def analyze(self,
+                source: Union[Path, str],
+                knp_dir: Optional[str] = None,
+                n_jobs: int = -1,
+                ) -> Tuple[list, PASDataset]:
         if isinstance(source, Path):
             self.logger.info(f'read knp files from {source}')
             save_dir = source
@@ -73,24 +73,30 @@ class Analyzer:
             knp_out = ''
             for i, sent in enumerate(sents):
                 knp_out_ = self._apply_knp(sent)
-                knp_out_ = knp_out_.replace('S-ID:1', f'S-ID:{i + 1}')
+                knp_out_ = knp_out_.replace('# S-ID:1', f'# S-ID:0-{i + 1}')
                 knp_out += knp_out_
-            with save_dir.joinpath(f'doc.knp').open(mode='wt') as f:
+            with save_dir.joinpath(f'0.knp').open(mode='wt') as f:
                 f.write(knp_out)
 
-        return self._analysis(save_dir)
+        return self._anal(save_dir, n_jobs)
 
-    def analyze_from_knp(self, knp_out: str, knp_dir: Optional[str] = None) -> Tuple[list, PASDataset]:
-        save_dir = Path(knp_dir) if knp_dir is not None else Path('log') / datetime.now().strftime(r'%m%d_%H%M%S')
+    def analyze_from_knp(self,
+                         knp_out: str,
+                         knp_dir: Optional[str] = None,
+                         n_jobs: int = -1,
+                         ) -> Tuple[list, PASDataset]:
+        save_dir = Path(knp_dir or 'log') / datetime.now().strftime(r'%m%d_%H%M%S')
         save_dir.mkdir(exist_ok=True)
         with save_dir.joinpath('doc.knp').open(mode='wt') as f:
             f.write(knp_out)
-        return self._analysis(save_dir)
+        return self._anal(save_dir, n_jobs)
 
-    def _analysis(self, path: Path) -> Tuple[list, PASDataset]:
-        self.config['test_kwdlc_dataset']['args']['path'] = str(path)
-        dataset = self.config.init_obj(f'test_kwdlc_dataset', module_dataset)
-        data_loader = self.config.init_obj(f'test_data_loader', module_loader, dataset)
+    def _anal(self, path: Path, n_jobs: int) -> Tuple[list, PASDataset]:
+        self.config['test_datasets']['kwdlc']['args']['path'] = str(path)
+        self.config['test_datasets']['kwdlc']['args']['gold_path'] = None
+        self.config['test_datasets']['kwdlc']['args']['n_jobs'] = n_jobs
+        dataset = self.config.init_obj('test_datasets.kwdlc', module_dataset)
+        data_loader = self.config.init_obj('data_loaders.test', module_loader, dataset)
 
         _, *predictions = self.inference(data_loader)
 

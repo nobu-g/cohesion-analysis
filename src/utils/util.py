@@ -1,16 +1,10 @@
 import json
 from pathlib import Path
-from datetime import datetime
 from collections import OrderedDict
 from collections.abc import Callable
 
 import torch
-
-
-def ensure_dir(dirname):
-    dirname = Path(dirname)
-    if not dirname.is_dir():
-        dirname.mkdir(parents=True, exist_ok=False)
+from kyoto_reader import BasePhrase
 
 
 def read_json(fname):
@@ -23,20 +17,6 @@ def read_json(fname):
 def write_json(content, fname):
     with fname.open('wt') as handle:
         json.dump(content, handle, ensure_ascii=False, indent=2, sort_keys=False)
-
-
-class Timer:
-    def __init__(self):
-        self.cache = datetime.now()
-
-    def check(self):
-        now = datetime.now()
-        duration = now - self.cache
-        self.cache = now
-        return duration.total_seconds()
-
-    def reset(self):
-        self.cache = datetime.now()
 
 
 class OrderedDefaultDict(OrderedDict):
@@ -97,3 +77,19 @@ def prepare_device(n_gpu_use: int, logger):
     device = torch.device('cuda:0' if n_gpu_use > 0 else 'cpu')
     list_ids = list(range(n_gpu_use))
     return device, list_ids
+
+
+def is_pas_target(bp: BasePhrase, verbal: bool, nominal: bool) -> bool:
+    if verbal and '用言' in bp.tag.features:
+        return True
+    if nominal and '非用言格解析' in bp.tag.features:
+        return True
+    return False
+
+
+def is_bridging_target(bp: BasePhrase) -> bool:
+    return '体言' in bp.tag.features and '非用言格解析' not in bp.tag.features
+
+
+def is_coreference_target(bp: BasePhrase) -> bool:
+    return '体言' in bp.tag.features

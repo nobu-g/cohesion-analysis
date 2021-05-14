@@ -7,6 +7,7 @@
 # python scripts/aggregator.py -r result/CAModel-all-4e-nict-coref-ocz-noun
 
 import argparse
+import os
 from pathlib import Path
 from typing import List, Tuple, Dict
 from functools import reduce
@@ -48,6 +49,10 @@ def _extract_tag(event_accumulators: List[EventAccumulator],
 
 
 def write_summary(base_dir: Path, aggregations_per_tag) -> None:
+    # remove existing files
+    for path in base_dir.glob('events.out.tfevents.*'):
+        os.remove(str(path))
+
     writer = FileWriter(base_dir)
 
     for tag, (steps, wall_times, aggregations) in aggregations_per_tag.items():
@@ -87,7 +92,7 @@ def main():
                                 for tag, (steps, wall_times, values) in extracts.items()}
         write_summary(summary_dir, aggregations_per_tag)
 
-    print(f'Ended aggregation {base_dir.name}')
+    print(f'Finished aggregation {base_dir.name}')
 
 
 if __name__ == '__main__':

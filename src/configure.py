@@ -1,14 +1,17 @@
+import argparse
+import copy
+import inspect
+import itertools
 import json
 import math
-import copy
-import argparse
-from typing import List
+import subprocess
+import sys
 from pathlib import Path
-import itertools
-import inspect
+from typing import List, Any
+
+import transformers.optimization as module_optim
 
 import model.model as module_arch
-import transformers.optimization as module_optim
 
 
 class Config:
@@ -51,10 +54,8 @@ def main() -> None:
                         help='perform coreference resolution')
     parser.add_argument('--bridging', '--brg', '--bar', action='store_true', default=False,
                         help='perform bridging anaphora resolution')
-    parser.add_argument('--case-string', type=str, default='ガ,ヲ,ニ,ガ２',
-                        help='case strings separated by ","')
-    parser.add_argument('--exophors', '--exo', type=str, default='著者,読者,不特定:人',
-                        help='exophor strings separated by ","')
+    parser.add_argument('--cases', default='ガ ヲ ニ ガ２'.split(), nargs='*',
+                        help='cases to perform PAS analysis (default: ガ ヲ ニ ガ２)')
     parser.add_argument('--dropout', type=float, default=0.0,
                         help='dropout ratio')
     parser.add_argument('--lr', type=float, default=5e-5,
@@ -71,9 +72,9 @@ def main() -> None:
                         help='number of gpus to use')
     parser.add_argument('--save-start-epoch', type=int, default=1,
                         help='you can skip saving of initial checkpoints, which reduces writing overhead')
-    parser.add_argument('--corpus', choices=['kwdlc', 'kc', 'all'], default=['all'], nargs='*',
+    parser.add_argument('--corpus', choices=['kwdlc', 'kc', 'fuman'], default=['kwdlc', 'kc'], nargs='*',
                         help='corpus to use in training')
-    parser.add_argument('--train-target', choices=['overt', 'case', 'zero'], default=['case', 'zero'], nargs='*',
+    parser.add_argument('--train-target', choices=['overt', 'dep', 'zero'], default=['overt', 'dep', 'zero'], nargs='*',
                         help='dependency type to train')
     parser.add_argument('--pas-target', choices=['none', 'pred', 'noun', 'all'], default=['pred'], nargs='*',
                         help='PAS analysis target (pred: verbal predicates, noun: nominal predicates, all: both)')
@@ -85,17 +86,18 @@ def main() -> None:
     data_root: Path = args.dataset.resolve()
     with data_root.joinpath('config.json').open() as f:
         dataset_config = json.load(f)
-    exophors = args.exophors.split(',')
-    cases: List[str] = args.case_string.split(',') if args.case_string else []
+    exophors = dataset_config['exophors']
+    # cases: List[str] = args.case_string.split(',') if args.case_string else []
     msg = '"ノ" found in case string. If you want to perform bridging anaphora resolution, specify "--bridging" option'
-    assert 'ノ' not in cases, msg
+    assert 'ノ' not in args.cases, msg
     pas_targets_list = [['pred'] * (t in ('pred', 'all')) + ['noun'] * (t in ('noun', 'all')) for t in args.pas_target]
 
-    for model, corpus, n_epoch, pas_targets in itertools.product(args.model, args.corpus, args.epoch, pas_targets_list):
-        items = [model]
-        items += [corpus, f'{n_epoch}e', dataset_config['bert_name']]
-        if pas_targets or args.bridging:
-            items.append(''.join(tgt[0] for tgt in ('overt', 'case', 'zero') if tgt in args.train_target))
+    for model, n_epoch, pas_targets in itertools.product(args.model, args.epoch, pas_targets_list):
+        items: List[Any] = [model]
+        corpus2abbr = {'kwdlc': 'w', 'kc': 'n', 'fuman': 'f'}
+        items += [''.join(corpus2abbr[c] for c in args.corpus), f'{n_epoch}e', dataset_config['bert_name']]
+        if pas_targets:
+            items.append(''.join(tgt[0] for tgt in ('overt', 'dep', 'zero') if tgt in args.train_target))
         if 'pred' in pas_targets:
             items.append('vpa')
         if 'noun' in pas_targets:
@@ -110,11 +112,15 @@ def main() -> None:
             items.append(args.additional_name)
         name = '-'.join(str(x) for x in items)
 
+        cases = args.cases if pas_targets else []
+
         num_train_examples = 0
-        if corpus in ('kwdlc', 'all'):
+        if 'kwdlc' in args.corpus:
             num_train_examples += dataset_config['num_examples']['kwdlc']['train']
-        if corpus in ('kc', 'all'):
+        if 'kc' in args.corpus:
             num_train_examples += dataset_config['num_examples']['kc']['train']
+        if 'fuman' in args.corpus:
+            num_train_examples += dataset_config['num_examples']['fuman']['train']
         if model == 'CommonsenseModel':
             num_train_examples += dataset_config['num_examples']['commonsense']['train']
 
@@ -122,6 +128,7 @@ def main() -> None:
             'type': model,
             'args': {
                 'bert_model': dataset_config['bert_path'],
+                'vocab_size': dataset_config['vocab_size'] + len(exophors) + 1 + int(args.coreference),
                 'dropout': args.dropout,
                 'num_case': len(cases) + int(args.bridging),
                 'coreference': args.coreference,
@@ -132,60 +139,44 @@ def main() -> None:
             'type': 'PASDataset',
             'args': {
                 'path': None,
+                'gold_path': None,
                 'cases': cases,
                 'exophors': exophors,
                 'coreference': args.coreference,
                 'bridging': args.bridging,
-                'dataset_config': dataset_config,
+                'max_seq_length': dataset_config['max_seq_length'],
+                'bert_path': dataset_config['bert_path'],
                 'training': None,
                 'kc': None,
                 'train_targets': args.train_target,
                 'pas_targets': pas_targets,
+                'n_jobs': -1 if args.debug is False else 0,
             },
         }
+        train_datasets = {}
+        valid_datasets = {}
+        test_datasets = {}
+        for corpus in args.corpus:
+            train_dataset = copy.deepcopy(dataset)
+            train_dataset['args']['path'] = str(data_root / corpus / 'train')
+            train_dataset['args']['training'] = True
+            train_dataset['args']['kc'] = (corpus == 'kc')
+            train_datasets[corpus] = train_dataset
 
-        train_kwdlc_dataset = None
-        valid_kwdlc_dataset = None
-        test_kwdlc_dataset = None
-        train_kc_dataset = None
-        valid_kc_dataset = None
-        test_kc_dataset = None
-        if corpus in ('kwdlc', 'all'):
-            train_kwdlc_dataset = copy.deepcopy(dataset)
-            train_kwdlc_dataset['args']['path'] = str(data_root / 'kwdlc' / 'train')
-            train_kwdlc_dataset['args']['training'] = True
-            train_kwdlc_dataset['args']['kc'] = False
+            valid_dataset = copy.deepcopy(dataset)
+            valid_dataset['args']['path'] = str(data_root / corpus / 'valid')
+            valid_dataset['args']['gold_path'] = str(data_root / corpus / 'valid_gold')
+            valid_dataset['args']['training'] = False
+            valid_dataset['args']['kc'] = (corpus == 'kc')
+            valid_datasets[corpus] = valid_dataset
 
-            valid_kwdlc_dataset = copy.deepcopy(dataset)
-            valid_kwdlc_dataset['args']['path'] = str(data_root / 'kwdlc' / 'valid')
-            valid_kwdlc_dataset['args']['training'] = False
-            valid_kwdlc_dataset['args']['kc'] = False
+            test_dataset = copy.deepcopy(dataset)
+            test_dataset['args']['path'] = str(data_root / corpus / 'test')
+            test_dataset['args']['gold_path'] = str(data_root / corpus / 'test_gold')
+            test_dataset['args']['training'] = False
+            test_dataset['args']['kc'] = (corpus == 'kc')
+            test_datasets[corpus] = test_dataset
 
-            test_kwdlc_dataset = copy.deepcopy(dataset)
-            test_kwdlc_dataset['args']['path'] = str(data_root / 'kwdlc' / 'test')
-            test_kwdlc_dataset['args']['training'] = False
-            test_kwdlc_dataset['args']['kc'] = False
-        if corpus in ('kc', 'all'):
-            train_kc_dataset = copy.deepcopy(dataset)
-            train_kc_dataset['args']['path'] = str(data_root / 'kc_split' / 'train')
-            train_kc_dataset['args']['training'] = True
-            train_kc_dataset['args']['kc'] = True
-
-            valid_kc_dataset = copy.deepcopy(dataset)
-            valid_kc_dataset['args']['path'] = str(data_root / 'kc_split' / 'valid')
-            valid_kc_dataset['args']['kc_joined_path'] = str(data_root / 'kc' / 'valid')
-            valid_kc_dataset['args']['training'] = False
-            valid_kc_dataset['args']['kc'] = True
-
-            test_kc_dataset = copy.deepcopy(dataset)
-            test_kc_dataset['args']['path'] = str(data_root / 'kc_split' / 'test')
-            test_kc_dataset['args']['kc_joined_path'] = str(data_root / 'kc' / 'test')
-            test_kc_dataset['args']['training'] = False
-            test_kc_dataset['args']['kc'] = True
-
-        train_commonsense_dataset = None
-        valid_commonsense_dataset = None
-        test_commonsense_dataset = None
         if model == 'CommonsenseModel':
             commonsense_dataset = {
                 'type': 'CommonsenseDataset',
@@ -198,30 +189,35 @@ def main() -> None:
             }
             train_commonsense_dataset = copy.deepcopy(commonsense_dataset)
             train_commonsense_dataset['args']['path'] = str(data_root / 'commonsense' / 'train.pkl')
+            train_datasets['commonsense'] = train_commonsense_dataset
+
             valid_commonsense_dataset = copy.deepcopy(commonsense_dataset)
             valid_commonsense_dataset['args']['path'] = str(data_root / 'commonsense' / 'valid.pkl')
+            valid_datasets['commonsense'] = valid_commonsense_dataset
+
             test_commonsense_dataset = copy.deepcopy(commonsense_dataset)
             test_commonsense_dataset['args']['path'] = str(data_root / 'commonsense' / 'test.pkl')
+            test_datasets['commonsense'] = test_commonsense_dataset
 
         data_loader = {
             'type': 'PASDataLoader',
             'args': {
                 'batch_size': args.batch_size,
                 'shuffle': None,
-                'num_workers': 4,
+                'num_workers': 0 if args.debug else 4,
+                'pin_memory': True,
             },
         }
-
+        data_loaders = {}
         train_data_loader = copy.deepcopy(data_loader)
         train_data_loader['args']['shuffle'] = (not args.debug)
+        data_loaders['train'] = train_data_loader
 
         valid_data_loader = copy.deepcopy(data_loader)
         valid_data_loader['args']['batch_size'] = args.eval_batch_size if args.eval_batch_size else args.batch_size
         valid_data_loader['args']['shuffle'] = False
-
-        test_data_loader = copy.deepcopy(data_loader)
-        test_data_loader['args']['batch_size'] = args.eval_batch_size if args.eval_batch_size else args.batch_size
-        test_data_loader['args']['shuffle'] = False
+        data_loaders['valid'] = valid_data_loader
+        data_loaders['test'] = copy.deepcopy(valid_data_loader)
 
         optimizer = {
             'type': 'AdamW',
@@ -236,28 +232,24 @@ def main() -> None:
         if pas_targets:
             if 'ガ' in cases:
                 metrics.append('case_analysis_f1_ga')
-            if 'ヲ' in cases:
-                metrics.append('case_analysis_f1_wo')
-            if 'ニ' in cases:
-                metrics.append('case_analysis_f1_ni')
-            if 'ガ２' in cases:
-                metrics.append('case_analysis_f1_ga2')
-            if any(met.startswith('case_analysis_f1_') for met in metrics):
-                metrics.append('case_analysis_f1')
-            if 'ガ' in cases:
                 metrics.append('zero_anaphora_f1_ga')
             if 'ヲ' in cases:
+                metrics.append('case_analysis_f1_wo')
                 metrics.append('zero_anaphora_f1_wo')
             if 'ニ' in cases:
+                metrics.append('case_analysis_f1_ni')
                 metrics.append('zero_anaphora_f1_ni')
             if 'ガ２' in cases:
+                metrics.append('case_analysis_f1_ga2')
                 metrics.append('zero_anaphora_f1_ga2')
-            if any(met.startswith('zero_anaphora_f1_') for met in metrics):
+            if {'ガ', 'ヲ', 'ニ', 'ガ２'} & set(cases):
                 metrics += [
+                    'case_analysis_f1',
                     'zero_anaphora_f1_inter',
                     'zero_anaphora_f1_intra',
                     'zero_anaphora_f1_exophora',
                     'zero_anaphora_f1',
+                    'pas_analysis_f1',
                 ]
         if args.coreference:
             metrics.append('coreference_f1')
@@ -279,19 +271,15 @@ def main() -> None:
             raise ValueError(f'unknown lr schedule: {args.lr_schedule}')
 
         mnt_mode = 'max'
-        if 'zero_anaphora_f1' in metrics:
-            mnt_metric = 'zero_anaphora_f1'
+        mnt_metric = 'val_all_'
+        if 'pas_analysis_f1' in metrics:
+            mnt_metric += 'pas_analysis_f1'
         elif 'coreference_f1' in metrics:
-            mnt_metric = 'coreference_f1'
+            mnt_metric += 'coreference_f1'
         elif 'bridging_anaphora_f1' in metrics:
-            mnt_metric = 'bridging_anaphora_f1'
+            mnt_metric += 'bridging_anaphora_f1'
         else:
-            mnt_metric = 'loss'
-            mnt_mode = 'min'
-        if corpus in ('kwdlc', 'all'):
-            mnt_metric = 'val_kwdlc_' + mnt_metric
-        else:
-            mnt_metric = 'val_kc_' + mnt_metric
+            raise ValueError('no metric to evaluate')
         trainer = {
             'epochs': n_epoch,
             'batch_size': args.batch_size,
@@ -301,25 +289,18 @@ def main() -> None:
             'verbosity': 2 if args.debug else 1,  # 0: WARNING, 1: INFO, 2: DEBUG
             'monitor': f'{mnt_mode} {mnt_metric}',
             'early_stop': 10,
-            'tensorboard': True,
         }
 
         config.write(
             name=name,
+            commit=subprocess.check_output(['git', 'rev-parse', 'HEAD']).decode().strip(),
+            args=' '.join(sys.argv),
             n_gpu=args.gpus,
             arch=arch,
-            train_kwdlc_dataset=train_kwdlc_dataset,
-            train_kc_dataset=train_kc_dataset,
-            train_commonsense_dataset=train_commonsense_dataset,
-            valid_kwdlc_dataset=valid_kwdlc_dataset,
-            valid_kc_dataset=valid_kc_dataset,
-            valid_commonsense_dataset=valid_commonsense_dataset,
-            test_kwdlc_dataset=test_kwdlc_dataset,
-            test_kc_dataset=test_kc_dataset,
-            test_commonsense_dataset=test_commonsense_dataset,
-            train_data_loader=train_data_loader,
-            valid_data_loader=valid_data_loader,
-            test_data_loader=test_data_loader,
+            train_datasets=train_datasets,
+            valid_datasets=valid_datasets,
+            test_datasets=test_datasets,
+            data_loaders=data_loaders,
             optimizer=optimizer,
             metrics=metrics,
             lr_scheduler=lr_scheduler,

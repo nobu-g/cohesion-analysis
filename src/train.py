@@ -26,25 +26,16 @@ def main(config: ConfigParser, args: argparse.Namespace):
 
     # setup data_loader instances
     train_datasets = []
-    if config['train_kwdlc_dataset'] is not None:
-        train_datasets.append(config.init_obj('train_kwdlc_dataset', module_dataset, logger=logger))
-    if config['train_kc_dataset'] is not None:
-        train_datasets.append(config.init_obj('train_kc_dataset', module_dataset, logger=logger))
-    if config['train_commonsense_dataset'] is not None:
-        train_datasets.append(config.init_obj('train_commonsense_dataset', module_dataset, logger=logger))
+    for corpus in config['train_datasets'].keys():
+        train_datasets.append(config.init_obj(f'train_datasets.{corpus}', module_dataset, logger=logger))
     train_dataset = ConcatDataset(train_datasets)
-    valid_kwdlc_dataset = None
-    if config['valid_kwdlc_dataset'] is not None:
-        valid_kwdlc_dataset = config.init_obj('valid_kwdlc_dataset', module_dataset, logger=logger)
-    valid_kc_dataset = None
-    if config['valid_kc_dataset'] is not None:
-        valid_kc_dataset = config.init_obj('valid_kc_dataset', module_dataset, logger=logger)
-    valid_commonsense_dataset = None
-    if config['valid_commonsense_dataset'] is not None:
-        valid_commonsense_dataset = config.init_obj('valid_commonsense_dataset', module_dataset, logger=logger)
+
+    valid_datasets = {}
+    for corpus in config['valid_datasets'].keys():
+        valid_datasets[corpus] = config.init_obj(f'valid_datasets.{corpus}', module_dataset, logger=logger)
 
     # build model architecture, then print to console
-    model: nn.Module = config.init_obj('arch', module_arch, vocab_size=train_datasets[0].expanded_vocab_size)
+    model: nn.Module = config.init_obj('arch', module_arch)
     logger.info(model)
 
     # get function handles of metrics
@@ -65,9 +56,7 @@ def main(config: ConfigParser, args: argparse.Namespace):
     trainer = Trainer(model, metrics, optimizer,
                       config=config,
                       train_dataset=train_dataset,
-                      valid_kwdlc_dataset=valid_kwdlc_dataset,
-                      valid_kc_dataset=valid_kc_dataset,
-                      valid_commonsense_dataset=valid_commonsense_dataset,
+                      valid_datasets=valid_datasets,
                       lr_scheduler=lr_scheduler)
 
     trainer.train()

@@ -1,27 +1,55 @@
-import io
-import sys
-import logging
 import argparse
-import textwrap
+import io
+import logging
+import sys
+from collections import OrderedDict
+from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Dict, Set, Union, Optional, TextIO
-from collections import OrderedDict
 
+import pandas as pd
+from jinja2 import Template, Environment, FileSystemLoader
+from kyoto_reader import KyotoReader, Document, Argument, SpecialArgument, BaseArgument, Predicate, Mention, BasePhrase
 from pyknp import BList
-from kyoto_reader import KyotoReader, Document, Argument, SpecialArgument, BaseArgument, Predicate, Mention
 
-from utils.util import OrderedDefaultDict
 from utils.constants import CASE2YOMI
+from utils.util import is_pas_target, is_bridging_target, is_coreference_target
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.WARNING)
 
 
 class Scorer:
+    """A class to evaluate system output.
+
+    To evaluate system output with this class, you have to prepare gold data and system prediction data as instances of
+    :class:`kyoto_reader.Document`
+
+    Args:
+        documents_pred (List[Document]): システム予測文書集合
+        documents_gold (List[Document]): 正解文書集合
+        target_cases (List[str]): 評価の対象とする格 (kyoto_reader.ALL_CASES を参照)
+        target_exophors (List[str]): 評価の対象とする外界照応の照応先 (kyoto_reader.ALL_EXOPHORS を参照)
+        bridging (bool): 橋渡し照応の評価を行うかどうか (default: False)
+        coreference (bool): 共参照の評価を行うかどうか (default: False)
+        pas_target (str): 述語項構造解析において述語として扱う対象 ('pred': 用言, 'noun': 体言, 'all': 両方, '': 述語なし (default: pred))
+
+    Attributes:
+        cases (List[str]): 評価の対象となる格
+        doc_ids: (List[str]): 評価の対象となる文書の文書ID集合
+        did2document_pred (Dict[str, Document]): 文書IDからシステム予測文書を引くための辞書
+        did2document_gold (Dict[str, Document]): 文書IDから正解文書を引くための辞書
+        bridging (bool): 橋渡し照応の評価を行うかどうか
+        coreference (bool): 共参照の評価を行うかどうか
+        pas_target (str): 述語項構造解析において述語として扱う対象
+        comp_result (Dict[tuple, str]): 正解と予測を比較した結果を格納するための辞書
+        sub_scorers (List[SubScorer]): 文書ごとの評価を行うオブジェクトのリスト
+        relax_exophors (Dict[str, str]): 「不特定:人１」などを「不特定:人」として評価するためのマップ
+    """
     DEPTYPE2ANALYSIS = OrderedDict([('overt', 'overt'),
-                                    ('dep', 'case_analysis'),
-                                    ('intra', 'zero_intra_sentential'),
-                                    ('inter', 'zero_inter_sentential'),
+                                    ('dep', 'dep'),
+                                    ('intra', 'zero_intra'),
+                                    ('inter', 'zero_inter'),
                                     ('exo', 'zero_exophora')])
 
     def __init__(self,
@@ -29,24 +57,21 @@ class Scorer:
                  documents_gold: List[Document],
                  target_cases: List[str],
                  target_exophors: List[str],
-                 coreference: bool = False,
                  bridging: bool = False,
+                 coreference: bool = False,
                  pas_target: str = 'pred'):
         # long document may have been ignored
         assert set(doc.doc_id for doc in documents_pred) <= set(doc.doc_id for doc in documents_gold)
-        self.cases: List[str] = target_cases
-        self.bridging: bool = bridging
+        self.cases: List[str] = target_cases if pas_target != '' else []
         self.doc_ids: List[str] = [doc.doc_id for doc in documents_pred]
         self.did2document_pred: Dict[str, Document] = {doc.doc_id: doc for doc in documents_pred}
         self.did2document_gold: Dict[str, Document] = {doc.doc_id: doc for doc in documents_gold}
-        self.coreference = coreference
+        self.bridging: bool = bridging
+        self.coreference: bool = coreference
+        self.pas_target: str = pas_target
+
         self.comp_result: Dict[tuple, str] = {}
-        self.measures: Dict[str, Dict[str, Measure]] = OrderedDict(
-            (case, OrderedDict((anal, Measure()) for anal in Scorer.DEPTYPE2ANALYSIS.values()))
-            for case in self.cases)
-        self.measure_coref: Measure = Measure()
-        self.measures_bridging: Dict[str, Measure] = OrderedDict(
-            (anal, Measure()) for anal in Scorer.DEPTYPE2ANALYSIS.values())
+        self.sub_scorers: List[SubScorer] = []
         self.relax_exophors: Dict[str, str] = {}
         for exophor in target_exophors:
             self.relax_exophors[exophor] = exophor
@@ -54,68 +79,272 @@ class Scorer:
                 for n in ('１', '２', '３', '４', '５', '６', '７', '８', '９', '１０', '１１'):
                     self.relax_exophors[exophor + n] = exophor
 
-        self.did2predicates_pred: Dict[str, List[Predicate]] = OrderedDefaultDict(list)
-        self.did2predicates_gold: Dict[str, List[Predicate]] = OrderedDefaultDict(list)
-        self.did2bridgings_pred: Dict[str, List[Predicate]] = OrderedDefaultDict(list)
-        self.did2bridgings_gold: Dict[str, List[Predicate]] = OrderedDefaultDict(list)
-        self.did2mentions_pred: Dict[str, List[Mention]] = OrderedDefaultDict(list)
-        self.did2mentions_gold: Dict[str, List[Mention]] = OrderedDefaultDict(list)
+    def run(self) -> 'ScoreResult':
+        """読み込んだ正解文書集合とシステム予測文書集合に対して評価を行う
+
+        Returns:
+            ScoreResult: 評価結果のスコア
+        """
+        self.comp_result = {}
+        self.sub_scorers = []
+        all_result = None
         for doc_id in self.doc_ids:
-            document_pred = self.did2document_pred[doc_id]
-            document_gold = self.did2document_gold[doc_id]
-            for predicate_pred in document_pred.get_predicates():
-                features = predicate_pred.tag.features
-                if (pas_target in ('pred', 'all') and '用言' in features) or \
-                        (pas_target in ('noun', 'all') and '非用言格解析' in features and '体言' in features):
-                    self.did2predicates_pred[doc_id].append(predicate_pred)
-                if self.bridging and '体言' in features and '非用言格解析' not in features:
-                    self.did2bridgings_pred[doc_id].append(predicate_pred)
-            for predicate_gold in document_gold.get_predicates():
-                features = predicate_gold.tag.features
-                if (pas_target in ('pred', 'all') and '用言' in features) or \
-                        (pas_target in ('noun', 'all') and '非用言格解析' in features and '体言' in features):
-                    self.did2predicates_gold[doc_id].append(predicate_gold)
-                if self.bridging and '体言' in features and '非用言格解析' not in features:
-                    self.did2bridgings_gold[doc_id].append(predicate_gold)
+            sub_scorer = SubScorer(self.did2document_pred[doc_id], self.did2document_gold[doc_id],
+                                   cases=self.cases,
+                                   bridging=self.bridging,
+                                   coreference=self.coreference,
+                                   relax_exophors=self.relax_exophors,
+                                   pas_target=self.pas_target)
+            if all_result is None:
+                all_result = sub_scorer.run()
+            else:
+                all_result += sub_scorer.run()
+            self.sub_scorers.append(sub_scorer)
+            self.comp_result.update({(doc_id, *key): val for key, val in sub_scorer.comp_result.items()})
+        return all_result
 
-            for mention_pred in document_pred.mentions.values():
-                if '体言' in mention_pred.tag.features:
-                    self.did2mentions_pred[doc_id].append(mention_pred)
-            for mention_gold in document_gold.mentions.values():
-                if '体言' in mention_gold.tag.features:
-                    self.did2mentions_gold[doc_id].append(mention_gold)
+    def write_html(self, output_file: Union[str, Path]) -> None:
+        """正解データとシステム予測の比較をHTML形式で書き出し
 
-        for doc_id in self.doc_ids:
-            document_pred = self.did2document_pred[doc_id]
-            document_gold = self.did2document_gold[doc_id]
-            self._evaluate_pas(doc_id, document_pred, document_gold)
-            if self.bridging:
-                self._evaluate_bridging(doc_id, document_pred, document_gold)
-            if self.coreference:
-                self._evaluate_coref(doc_id, document_pred, document_gold)
+        Args:
+            output_file (Union[str, Path]): 出力先ファイル
+        """
+        data: List[tuple] = []
+        for sub_scorer in self.sub_scorers:
+            gold_tree = ''
+            for sid in sub_scorer.document_gold.sid2sentence.keys():
+                with io.StringIO() as string:
+                    self._draw_tree(sid,
+                                    sub_scorer.predicates_gold,
+                                    sub_scorer.mentions_gold,
+                                    sub_scorer.bridgings_gold,
+                                    sub_scorer.document_gold,
+                                    fh=string)
+                    gold_tree += string.getvalue()
 
-    def _evaluate_pas(self, doc_id: str, document_pred: Document, document_gold: Document):
-        """calculate PAS analysis scores"""
-        dtid2predicate_pred: Dict[int, Predicate] = {pred.dtid: pred for pred in self.did2predicates_pred[doc_id]}
-        dtid2predicate_gold: Dict[int, Predicate] = {pred.dtid: pred for pred in self.did2predicates_gold[doc_id]}
+            pred_tree = ''
+            for sid in sub_scorer.document_pred.sid2sentence.keys():
+                with io.StringIO() as string:
+                    self._draw_tree(sid,
+                                    sub_scorer.predicates_pred,
+                                    sub_scorer.mentions_pred,
+                                    sub_scorer.bridgings_pred,
+                                    sub_scorer.document_pred,
+                                    fh=string)
+                    pred_tree += string.getvalue()
+            data.append((sub_scorer.document_gold.sentences, gold_tree, pred_tree))
 
-        for dtid in range(len(document_pred.tag_list())):
+        env = Environment(loader=FileSystemLoader(str(Path(__file__).parent)))
+        template: Template = env.get_template('template.html')
+
+        with Path(output_file).open('wt') as f:
+            f.write(template.render({'data': data}))
+
+    def _draw_tree(self,
+                   sid: str,
+                   predicates: List[BasePhrase],
+                   mentions: List[BasePhrase],
+                   anaphors: List[BasePhrase],
+                   document: Document,
+                   fh: Optional[TextIO] = None,
+                   html: bool = True
+                   ) -> None:
+        """Write the predicate-argument structures, coreference relations, and bridging anaphora relations of the
+        specified sentence in tree format.
+
+        Args:
+            sid (str): 出力対象の文ID
+            predicates (List[BasePhrase]): documentに含まれる全ての述語
+            mentions (List[BasePhrase]): documentに含まれる全てのメンション
+            anaphors (List[BasePhrase]): documentに含まれる全ての橋渡し照応詞
+            document (Document): 出力対象の文が含まれる文書
+            fh (Optional[TextIO]): 出力ストリーム
+            html (bool): HTML形式で出力するかどうか
+        """
+        result2color = {anal: 'blue' for anal in Scorer.DEPTYPE2ANALYSIS.values()}
+        result2color.update({'overt': 'green', 'wrong': 'red', None: 'gray'})
+        result2color_coref = {'correct': 'blue', 'wrong': 'red', None: 'gray'}
+        blist: BList = document.sid2sentence[sid].blist
+        with io.StringIO() as string:
+            blist.draw_tag_tree(fh=string, show_pos=False)
+            tree_strings = string.getvalue().rstrip('\n').split('\n')
+        assert len(tree_strings) == len(blist.tag_list())
+        all_targets = [m.core for m in document.mentions.values()]
+        tid2predicate: Dict[int, BasePhrase] = {predicate.tid: predicate for predicate in predicates
+                                                if predicate.sid == sid}
+        tid2mention: Dict[int, BasePhrase] = {mention.tid: mention for mention in mentions if mention.sid == sid}
+        tid2bridging: Dict[int, BasePhrase] = {anaphor.tid: anaphor for anaphor in anaphors if anaphor.sid == sid}
+        for tid in range(len(tree_strings)):
+            tree_strings[tid] += '  '
+            if tid in tid2predicate:
+                predicate = tid2predicate[tid]
+                arguments = document.get_arguments(predicate)
+                for case in self.cases:
+                    args = arguments[case]
+                    if case == 'ガ':
+                        args += arguments['判ガ']
+                    targets = set()
+                    for arg in args:
+                        target = str(arg)
+                        if all_targets.count(str(arg)) > 1 and isinstance(arg, Argument):
+                            target += str(arg.dtid)
+                        targets.add(target)
+                    result = self.comp_result.get((document.doc_id, predicate.dtid, case), None)
+                    if html:
+                        tree_strings[tid] += f'<font color="{result2color[result]}">{case}:{",".join(targets)}</font> '
+                    else:
+                        tree_strings[tid] += f'{case}:{",".join(targets)} '
+
+            if self.bridging and tid in tid2bridging:
+                anaphor = tid2bridging[tid]
+                arguments = document.get_arguments(anaphor)
+                args = arguments['ノ'] + arguments['ノ？']
+                targets = set()
+                for arg in args:
+                    target = str(arg)
+                    if all_targets.count(str(arg)) > 1 and isinstance(arg, Argument):
+                        target += str(arg.dtid)
+                    targets.add(target)
+                result = self.comp_result.get((document.doc_id, anaphor.dtid, 'ノ'), None)
+                if html:
+                    tree_strings[tid] += f'<font color="{result2color[result]}">ノ:{",".join(targets)}</font> '
+                else:
+                    tree_strings[tid] += f'ノ:{",".join(targets)} '
+
+            if self.coreference and tid in tid2mention:
+                targets = set()
+                src_dtid = tid2mention[tid].dtid
+                if src_dtid in document.mentions:
+                    src_mention = document.mentions[src_dtid]
+                    tgt_mentions_relaxed = SubScorer.filter_mentions(
+                        document.get_siblings(src_mention, relax=True), src_mention)
+                    for tgt_mention in tgt_mentions_relaxed:
+                        target: str = tgt_mention.core
+                        if all_targets.count(target) > 1:
+                            target += str(tgt_mention.dtid)
+                        targets.add(target)
+                    for eid in src_mention.eids:
+                        entity = document.entities[eid]
+                        if entity.exophor in self.relax_exophors:
+                            targets.add(entity.exophor)
+                result = self.comp_result.get((document.doc_id, src_dtid, '='), None)
+                if html:
+                    tree_strings[tid] += f'<font color="{result2color_coref[result]}">＝:{",".join(targets)}</font>'
+                else:
+                    tree_strings[tid] += '＝:' + ','.join(targets)
+
+        print('\n'.join(tree_strings), file=fh)
+
+
+class SubScorer:
+    """Scorer for single document pair.
+
+    Args:
+        document_pred (Document): システム予測文書
+        document_gold (Document): 正解文書
+        cases (List[str]): 評価の対象とする格
+        bridging (bool): 橋渡し照応の評価を行うかどうか (default: False)
+        coreference (bool): 共参照の評価を行うかどうか (default: False)
+        relax_exophors (Dict[str, str]): 「不特定:人１」などを「不特定:人」として評価するためのマップ
+        pas_target (str): 述語項構造解析において述語として扱う対象
+
+    Attributes:
+        doc_id (str): 対象の文書ID
+        document_pred (Document): システム予測文書
+        document_gold (Document): 正解文書
+        cases (List[str]): 評価の対象となる格
+        pas (bool): 述語項構造の評価を行うかどうか
+        bridging (bool): 橋渡し照応の評価を行うかどうか
+        coreference (bool): 共参照の評価を行うかどうか
+        comp_result (Dict[tuple, str]): 正解と予測を比較した結果を格納するための辞書
+        relax_exophors (Dict[str, str]): 「不特定:人１」などを「不特定:人」として評価するためのマップ
+        predicates_pred: (List[BasePhrase]): システム予測文書に含まれる述語
+        bridgings_pred: (List[BasePhrase]): システム予測文書に含まれる橋渡し照応詞
+        mentions_pred: (List[BasePhrase]): システム予測文書に含まれるメンション
+        predicates_gold: (List[BasePhrase]): 正解文書に含まれる述語
+        bridgings_gold: (List[BasePhrase]): 正解文書に含まれる橋渡し照応詞
+        mentions_gold: (List[BasePhrase]): 正解文書に含まれるメンション
+    """
+
+    def __init__(self,
+                 document_pred: Document,
+                 document_gold: Document,
+                 cases: List[str],
+                 bridging: bool,
+                 coreference: bool,
+                 relax_exophors: Dict[str, str],
+                 pas_target: str):
+        assert document_pred.doc_id == document_gold.doc_id
+        self.doc_id: str = document_gold.doc_id
+        self.document_pred: Document = document_pred
+        self.document_gold: Document = document_gold
+        self.cases: List[str] = cases
+        self.pas: bool = pas_target != ''
+        self.bridging: bool = bridging
+        self.coreference: bool = coreference
+        self.comp_result: Dict[tuple, str] = {}
+        self.relax_exophors: Dict[str, str] = relax_exophors
+
+        self.predicates_pred: List[BasePhrase] = []
+        self.bridgings_pred: List[BasePhrase] = []
+        self.mentions_pred: List[BasePhrase] = []
+        for bp in document_pred.bp_list():
+            if is_pas_target(bp, verbal=(pas_target in ('pred', 'all')), nominal=(pas_target in ('noun', 'all'))):
+                self.predicates_pred.append(bp)
+            if self.bridging and is_bridging_target(bp):
+                self.bridgings_pred.append(bp)
+            if self.coreference and is_coreference_target(bp):
+                self.mentions_pred.append(bp)
+        self.predicates_gold: List[BasePhrase] = []
+        self.bridgings_gold: List[BasePhrase] = []
+        self.mentions_gold: List[BasePhrase] = []
+        for bp in document_gold.bp_list():
+            if is_pas_target(bp, verbal=(pas_target in ('pred', 'all')), nominal=(pas_target in ('noun', 'all'))):
+                self.predicates_gold.append(bp)
+            if self.bridging and is_bridging_target(bp):
+                self.bridgings_gold.append(bp)
+            if self.coreference and is_coreference_target(bp):
+                self.mentions_gold.append(bp)
+
+    def run(self) -> 'ScoreResult':
+        """Perform evaluation for the given gold document and system prediction document.
+
+        Returns:
+            ScoreResult: 評価結果のスコア
+        """
+        self.comp_result = {}
+        measures_pas = self._evaluate_pas() if self.pas else None
+        measures_bridging = self._evaluate_bridging() if self.bridging else None
+        measure_coref = self._evaluate_coref() if self.coreference else None
+        return ScoreResult(measures_pas, measures_bridging, measure_coref)
+
+    def _evaluate_pas(self) -> pd.DataFrame:
+        """calculate predicate-argument structure analysis scores"""
+        # measures: Dict[str, Dict[str, Measure]] = OrderedDict(
+        #     (case, OrderedDict((anal, Measure()) for anal in Scorer.DEPTYPE2ANALYSIS.values()))
+        #     for case in self.cases)
+        measures = pd.DataFrame([[Measure() for _ in Scorer.DEPTYPE2ANALYSIS.values()] for _ in self.cases],
+                                index=self.cases, columns=Scorer.DEPTYPE2ANALYSIS.values())
+        dtid2predicate_pred: Dict[int, Predicate] = {pred.dtid: pred for pred in self.predicates_pred}
+        dtid2predicate_gold: Dict[int, Predicate] = {pred.dtid: pred for pred in self.predicates_gold}
+
+        for dtid in range(len(self.document_pred.bp_list())):
             if dtid in dtid2predicate_pred:
                 predicate_pred = dtid2predicate_pred[dtid]
-                arguments_pred = document_pred.get_arguments(predicate_pred, relax=False)
+                arguments_pred = self.document_pred.get_arguments(predicate_pred, relax=False)
             else:
                 arguments_pred = None
 
             if dtid in dtid2predicate_gold:
                 predicate_gold = dtid2predicate_gold[dtid]
-                arguments_gold = document_gold.get_arguments(predicate_gold, relax=False)
-                arguments_gold_relaxed = document_gold.get_arguments(predicate_gold, relax=True)
+                arguments_gold = self.document_gold.get_arguments(predicate_gold, relax=False)
+                arguments_gold_relaxed = self.document_gold.get_arguments(predicate_gold, relax=True)
             else:
                 predicate_gold = arguments_gold = arguments_gold_relaxed = None
 
             for case in self.cases:
                 args_pred: List[BaseArgument] = arguments_pred[case] if arguments_pred is not None else []
-                assert len(args_pred) in (0, 1)  # this project predicts one argument for one predicate
+                assert len(args_pred) in (0, 1)  # Our analyzer predicts one argument for one predicate
                 if predicate_gold is not None:
                     args_gold = self._filter_args(arguments_gold[case], predicate_gold)
                     args_gold_relaxed = self._filter_args(
@@ -124,22 +353,26 @@ class Scorer:
                 else:
                     args_gold = args_gold_relaxed = []
 
-                key = (doc_id, dtid, case)
+                key = (dtid, case)
 
                 # calculate precision
                 if args_pred:
                     arg = args_pred[0]
-                    analysis = Scorer.DEPTYPE2ANALYSIS[arg.dep_type]
                     if arg in args_gold_relaxed:
+                        # use dep_type of gold argument if possible
+                        arg_gold = args_gold_relaxed[args_gold_relaxed.index(arg)]
+                        analysis = Scorer.DEPTYPE2ANALYSIS[arg_gold.dep_type]
                         self.comp_result[key] = analysis
-                        self.measures[case][analysis].correct += 1
+                        measures.at[case, analysis].correct += 1
                     else:
+                        # system出力のdep_typeはgoldのものと違うので不整合が起きるかもしれない
+                        analysis = Scorer.DEPTYPE2ANALYSIS[arg.dep_type]
                         self.comp_result[key] = 'wrong'  # precision が下がる
-                    self.measures[case][analysis].denom_pred += 1
+                    measures.at[case, analysis].denom_pred += 1
 
                 # calculate recall
-                # 正解が複数ある場合、そのうち一つが当てられていればそれを正解に採用．
-                # いずれも当てられていなければ、relax されていない項から一つを選び正解に採用．
+                # 正解が複数ある場合、そのうち一つが当てられていればそれを正解に採用
+                # いずれも当てられていなければ、relax されていない項から一つを選び正解に採用
                 if args_gold or (self.comp_result.get(key, None) in Scorer.DEPTYPE2ANALYSIS.values()):
                     arg_gold = None
                     for arg in args_gold_relaxed:
@@ -155,7 +388,8 @@ class Scorer:
                             assert self.comp_result[key] == 'wrong'
                         else:
                             self.comp_result[key] = 'wrong'  # recall が下がる
-                    self.measures[case][analysis].denom_gold += 1
+                    measures.at[case, analysis].denom_gold += 1
+        return measures
 
     def _filter_args(self,
                      args: List[BaseArgument],
@@ -175,41 +409,50 @@ class Scorer:
             filtered_args.append(arg)
         return filtered_args
 
-    def _evaluate_bridging(self, doc_id: str, document_pred: Document, document_gold: Document):
-        dtid2anaphor_pred: Dict[int, Predicate] = {pred.dtid: pred for pred in self.did2bridgings_pred[doc_id]}
-        dtid2anaphor_gold: Dict[int, Predicate] = {pred.dtid: pred for pred in self.did2bridgings_gold[doc_id]}
+    def _evaluate_bridging(self) -> pd.Series:
+        """calculate bridging anaphora resolution scores"""
+        measures: Dict[str, Measure] = OrderedDict((anal, Measure()) for anal in Scorer.DEPTYPE2ANALYSIS.values())
+        dtid2anaphor_pred: Dict[int, Predicate] = {pred.dtid: pred for pred in self.bridgings_pred}
+        dtid2anaphor_gold: Dict[int, Predicate] = {pred.dtid: pred for pred in self.bridgings_gold}
 
-        for dtid in range(len(document_pred.tag_list())):
+        for dtid in range(len(self.document_pred.bp_list())):
             if dtid in dtid2anaphor_pred:
-                anaphor_pred: Predicate = dtid2anaphor_pred[dtid]
+                anaphor_pred = dtid2anaphor_pred[dtid]
                 antecedents_pred: List[BaseArgument] = \
-                    self._filter_args(document_pred.get_arguments(anaphor_pred, relax=False)['ノ'], anaphor_pred)
+                    self._filter_args(self.document_pred.get_arguments(anaphor_pred, relax=False)['ノ'], anaphor_pred)
             else:
                 antecedents_pred = []
-            assert len(antecedents_pred) in (0, 1)  # this project predicts one argument for one predicate
+            assert len(antecedents_pred) in (0, 1)  # in bert_pas_analysis, predict one argument for one predicate
 
             if dtid in dtid2anaphor_gold:
                 anaphor_gold: Predicate = dtid2anaphor_gold[dtid]
                 antecedents_gold: List[BaseArgument] = \
-                    self._filter_args(document_gold.get_arguments(anaphor_gold, relax=False)['ノ'], anaphor_gold)
+                    self._filter_args(self.document_gold.get_arguments(anaphor_gold, relax=False)['ノ'], anaphor_gold)
+                arguments: Dict[str, List[BaseArgument]] = self.document_gold.get_arguments(anaphor_gold, relax=True)
                 antecedents_gold_relaxed: List[BaseArgument] = \
-                    self._filter_args(document_gold.get_arguments(anaphor_gold, relax=True)['ノ'] +
-                                      document_gold.get_arguments(anaphor_gold, relax=True)['ノ？'], anaphor_gold)
+                    self._filter_args(arguments['ノ'] + arguments['ノ？'], anaphor_gold)
             else:
                 antecedents_gold = antecedents_gold_relaxed = []
 
-            key = (doc_id, dtid, 'ノ')
+            key = (dtid, 'ノ')
 
             # calculate precision
             if antecedents_pred:
                 antecedent_pred = antecedents_pred[0]
-                analysis = Scorer.DEPTYPE2ANALYSIS[antecedent_pred.dep_type]
                 if antecedent_pred in antecedents_gold_relaxed:
+                    # use dep_type of gold antecedent if possible
+                    antecedent_gold = antecedents_gold_relaxed[antecedents_gold_relaxed.index(antecedent_pred)]
+                    analysis = Scorer.DEPTYPE2ANALYSIS[antecedent_gold.dep_type]
+                    if analysis == 'overt':
+                        analysis = 'dep'
                     self.comp_result[key] = analysis
-                    self.measures_bridging[analysis].correct += 1
+                    measures[analysis].correct += 1
                 else:
+                    analysis = Scorer.DEPTYPE2ANALYSIS[antecedent_pred.dep_type]
+                    if analysis == 'overt':
+                        analysis = 'dep'
                     self.comp_result[key] = 'wrong'
-                self.measures_bridging[analysis].denom_pred += 1
+                measures[analysis].denom_pred += 1
 
             # calculate recall
             if antecedents_gold or (self.comp_result.get(key, None) in Scorer.DEPTYPE2ANALYSIS.values()):
@@ -220,107 +463,124 @@ class Scorer:
                         break
                 if antecedent_gold is not None:
                     analysis = Scorer.DEPTYPE2ANALYSIS[antecedent_gold.dep_type]
+                    if analysis == 'overt':
+                        analysis = 'dep'
                     assert self.comp_result[key] == analysis
                 else:
                     analysis = Scorer.DEPTYPE2ANALYSIS[antecedents_gold[0].dep_type]
+                    if analysis == 'overt':
+                        analysis = 'dep'
                     if antecedents_pred:
                         assert self.comp_result[key] == 'wrong'
                     else:
                         self.comp_result[key] = 'wrong'
-                self.measures_bridging[analysis].denom_gold += 1
+                measures[analysis].denom_gold += 1
+        return pd.Series(measures)
 
-    def _evaluate_coref(self, doc_id: str, document_pred: Document, document_gold: Document):
-        dtid2mention_pred: Dict[int, Mention] = {ment.dtid: ment for ment in self.did2mentions_pred[doc_id]}
-        dtid2mention_gold: Dict[int, Mention] = {ment.dtid: ment for ment in self.did2mentions_gold[doc_id]}
-
-        for dtid in range(len(document_pred.tag_list())):
+    def _evaluate_coref(self) -> pd.Series:
+        """calculate coreference resolution scores"""
+        measure = Measure()
+        dtid2mention_pred: Dict[int, Mention] = {bp.dtid: self.document_pred.mentions[bp.dtid]
+                                                 for bp in self.mentions_pred
+                                                 if bp.dtid in self.document_pred.mentions}
+        dtid2mention_gold: Dict[int, Mention] = {bp.dtid: self.document_gold.mentions[bp.dtid]
+                                                 for bp in self.mentions_gold
+                                                 if bp.dtid in self.document_gold.mentions}
+        for dtid in range(len(self.document_pred.bp_list())):
             if dtid in dtid2mention_pred:
                 src_mention_pred = dtid2mention_pred[dtid]
                 tgt_mentions_pred = \
-                    self._filter_mentions(document_pred.get_siblings(src_mention_pred), src_mention_pred)
-                exophors_pred = [e.exophor for e in map(document_pred.entities.get, src_mention_pred.eids)
-                                 if e.is_special]
+                    self.filter_mentions(self.document_pred.get_siblings(src_mention_pred), src_mention_pred)
+                exophors_pred = {e.exophor for e in map(self.document_pred.entities.get, src_mention_pred.eids)
+                                 if e.is_special}
             else:
-                tgt_mentions_pred = exophors_pred = []
+                tgt_mentions_pred = exophors_pred = set()
 
             if dtid in dtid2mention_gold:
                 src_mention_gold = dtid2mention_gold[dtid]
-                tgt_mentions_gold = \
-                    self._filter_mentions(document_gold.get_siblings(src_mention_gold, relax=False), src_mention_gold)
-                tgt_mentions_gold_relaxed = \
-                    self._filter_mentions(document_gold.get_siblings(src_mention_gold, relax=True), src_mention_gold)
-                exophors_gold = [e.exophor for e in map(document_gold.entities.get, src_mention_gold.eids)
-                                 if e.is_special and e.exophor in self.relax_exophors.values()]
-                exophors_gold_relaxed = [e.exophor for e in map(document_gold.entities.get, src_mention_gold.all_eids)
-                                         if e.is_special and e.exophor in self.relax_exophors.values()]
+                tgt_mentions_gold = self.filter_mentions(self.document_gold.get_siblings(src_mention_gold, relax=False),
+                                                         src_mention_gold)
+                tgt_mentions_gold_relaxed = self.filter_mentions(
+                    self.document_gold.get_siblings(src_mention_gold, relax=True), src_mention_gold)
+                exophors_gold = {self.relax_exophors[e.exophor] for e
+                                 in map(self.document_gold.entities.get, src_mention_gold.eids)
+                                 if e.is_special and e.exophor in self.relax_exophors}
+                exophors_gold_relaxed = {self.relax_exophors[e.exophor] for e
+                                         in map(self.document_gold.entities.get, src_mention_gold.all_eids)
+                                         if e.is_special and e.exophor in self.relax_exophors}
             else:
-                tgt_mentions_gold = tgt_mentions_gold_relaxed = exophors_gold = exophors_gold_relaxed = []
+                tgt_mentions_gold = tgt_mentions_gold_relaxed = exophors_gold = exophors_gold_relaxed = set()
 
-            key = (doc_id, dtid, '=')
+            key = (dtid, '=')
 
             # calculate precision
             if tgt_mentions_pred or exophors_pred:
-                if (set(tgt_mentions_pred) & set(tgt_mentions_gold_relaxed)) \
-                        or (set(exophors_pred) & set(exophors_gold_relaxed)):
+                if (tgt_mentions_pred & tgt_mentions_gold_relaxed) or (exophors_pred & exophors_gold_relaxed):
                     self.comp_result[key] = 'correct'
-                    self.measure_coref.correct += 1
+                    measure.correct += 1
                 else:
                     self.comp_result[key] = 'wrong'
-                self.measure_coref.denom_pred += 1
+                measure.denom_pred += 1
 
             # calculate recall
             if tgt_mentions_gold or exophors_gold or (self.comp_result.get(key, None) == 'correct'):
-                if (set(tgt_mentions_pred) & set(tgt_mentions_gold_relaxed)) \
-                        or (set(exophors_pred) & set(exophors_gold_relaxed)):
+                if (tgt_mentions_pred & tgt_mentions_gold_relaxed) or (exophors_pred & exophors_gold_relaxed):
                     assert self.comp_result[key] == 'correct'
                 else:
                     self.comp_result[key] = 'wrong'
-                self.measure_coref.denom_gold += 1
+                measure.denom_gold += 1
+        return pd.Series([measure], index=['all'])
 
     @staticmethod
-    def _filter_mentions(tgt_mentions: Set[Mention], src_mention: Mention) -> List[Mention]:
-        return [tgt_mention for tgt_mention in tgt_mentions if tgt_mention.dtid < src_mention.dtid]
+    def filter_mentions(tgt_mentions: Set[Mention], src_mention: Mention) -> Set[Mention]:
+        """filter out cataphors"""
+        return {tgt_mention for tgt_mention in tgt_mentions if tgt_mention.dtid < src_mention.dtid}
 
-    def result_dict(self) -> Dict[str, Dict[str, 'Measure']]:
-        result = OrderedDict()
-        all_case_result = OrderedDefaultDict(lambda: Measure())
-        for case, measures in self.measures.items():
-            case_result = OrderedDefaultDict(lambda: Measure())
-            case_result.update(measures)
-            case_result['zero_all'] = case_result['zero_intra_sentential'] + \
-                                      case_result['zero_inter_sentential'] + \
-                                      case_result['zero_exophora']
-            case_result['all'] = case_result['case_analysis'] + case_result['zero_all']
-            case_result['all_w_overt'] = case_result['all'] + case_result['overt']
-            for analysis, measure in case_result.items():
-                all_case_result[analysis] += measure
-            result[case] = case_result
 
-        if self.coreference:
-            all_case_result['coreference'] = self.measure_coref
+@dataclass(frozen=True)
+class ScoreResult:
+    """A data class for storing the numerical result of an evaluation"""
+    measures_pas: Optional[pd.DataFrame]
+    measures_bridging: Optional[pd.Series]
+    measure_coref: Optional[pd.Series]
+
+    def to_dict(self) -> Dict[str, Dict[str, 'Measure']]:
+        """convert data to dictionary"""
+        df_all = pd.DataFrame(index=['all_case'])
+        if self.pas:
+            df_pas: pd.DataFrame = self.measures_pas.copy()
+            df_pas['zero'] = df_pas['zero_intra'] + df_pas['zero_inter'] + df_pas['zero_exophora']
+            df_pas['dep_zero'] = df_pas['zero'] + df_pas['dep']
+            df_pas['all'] = df_pas['dep_zero'] + df_pas['overt']
+            df_all = pd.concat([df_pas, df_all])
+            df_all.loc['all_case'] = df_pas.sum(axis=0)
 
         if self.bridging:
-            case_result = OrderedDefaultDict(lambda: Measure())
-            case_result.update(self.measures_bridging)
-            case_result['zero_all'] = case_result['zero_intra_sentential'] + \
-                                      case_result['zero_inter_sentential'] + \
-                                      case_result['zero_exophora']
-            case_result['all'] = case_result['case_analysis'] + case_result['zero_all']
-            case_result['all_w_overt'] = case_result['all'] + case_result['overt']
-            all_case_result['bridging'] = case_result['all']
-            all_case_result['bridging_w_overt'] = case_result['all_w_overt']
+            df_bar = self.measures_bridging.copy()
+            df_bar['zero'] = df_bar['zero_intra'] + df_bar['zero_inter'] + df_bar['zero_exophora']
+            df_bar['dep_zero'] = df_bar['zero'] + df_bar['dep']
+            assert df_bar['overt'] == Measure()  # No overt in BAR
+            df_bar['all'] = df_bar['dep_zero']
+            df_all.at['all_case', 'bridging'] = df_bar['all']
 
-        result['all_case'] = all_case_result
-        return result
+        if self.coreference:
+            df_all.at['all_case', 'coreference'] = self.measure_coref['all']
 
-    def export_txt(self, destination: Union[str, Path, TextIO]):
+        return {k1: {k2: v2 for k2, v2 in v1.items() if pd.notnull(v2)}
+                for k1, v1 in df_all.to_dict(orient='index').items()}
+
+    def export_txt(self,
+                   destination: Union[str, Path, TextIO]
+                   ) -> None:
+        """Export the evaluation results in a text format.
+
+        Args:
+            destination (Union[str, Path, TextIO]): 書き出す先
+        """
         lines = []
-        for case, measures in self.result_dict().items():
-            if case in self.cases:
-                lines.append(f'{case}格')
-            else:
-                lines.append(f'{case}')
-            for analysis, measure in measures.items():
+        for key, ms in self.to_dict().items():
+            lines.append(f'{key}格' if self.pas and key in self.measures_pas.index else key)
+            for analysis, measure in ms.items():
                 lines.append(f'  {analysis}')
                 lines.append(f'    precision: {measure.precision:.4f} ({measure.correct}/{measure.denom_pred})')
                 lines.append(f'    recall   : {measure.recall:.4f} ({measure.correct}/{measure.denom_gold})')
@@ -333,14 +593,23 @@ class Scorer:
         elif isinstance(destination, io.TextIOBase):
             destination.write(text)
 
-    def export_csv(self, destination: Union[str, Path, TextIO], sep: str = ','):
+    def export_csv(self,
+                   destination: Union[str, Path, TextIO],
+                   sep: str = ','
+                   ) -> None:
+        """Export the evaluation results in a csv format.
+
+        Args:
+            destination (Union[str, Path, TextIO]): 書き出す先
+            sep (str): 区切り文字 (default: ',')
+        """
         text = ''
-        result_dict = self.result_dict()
+        result_dict = self.to_dict()
         text += 'case' + sep
         text += sep.join(result_dict['all_case'].keys()) + '\n'
         for case, measures in result_dict.items():
             text += CASE2YOMI.get(case, case) + sep
-            text += sep.join(f'{measure.f1:.5}' for measure in measures.values())
+            text += sep.join(f'{measure.f1:.6}' for measure in measures.values())
             text += '\n'
 
         if isinstance(destination, str) or isinstance(destination, Path):
@@ -349,214 +618,61 @@ class Scorer:
         elif isinstance(destination, io.TextIOBase):
             destination.write(text)
 
-    def write_html(self, output_file: Union[str, Path]):
-        if isinstance(output_file, str):
-            output_file = Path(output_file)
-        with output_file.open('w') as writer:
-            writer.write('<html lang="ja">\n')
-            writer.write(self._html_header())
-            writer.write('<body>\n')
-            writer.write('<h2>Bert Result</h2>\n')
-            writer.write('<pre>\n')
-            for doc_id in self.doc_ids:
-                document_pred = self.did2document_pred[doc_id]
-                document_gold = self.did2document_gold[doc_id]
-                writer.write('<h3 class="obi1">')
-                for sid, sentence in document_gold.sid2sentence.items():
-                    writer.write(sid + ' ')
-                    writer.write(''.join(bnst.midasi for bnst in sentence.bnst_list()))
-                    writer.write('<br>')
-                writer.write('</h3>\n')
-                writer.write('<table>')
-                writer.write('<tr>\n<th>gold</th>\n')
-                writer.write('<th>prediction</th>\n</tr>')
+    @property
+    def pas(self):
+        """Whether self includes the score of predicate-argument structure analysis."""
+        return self.measures_pas is not None
 
-                writer.write('<tr>')
-                # gold
-                writer.write('<td><pre>\n')
-                for sid in document_gold.sid2sentence.keys():
-                    self._draw_tree(sid,
-                                    self.did2predicates_gold[doc_id],
-                                    self.did2mentions_gold[doc_id],
-                                    self.did2bridgings_gold[doc_id],
-                                    document_gold,
-                                    fh=writer)
-                    writer.write('\n')
-                writer.write('</pre>')
-                # prediction
-                writer.write('<td><pre>\n')
-                for sid in document_pred.sid2sentence.keys():
-                    self._draw_tree(sid,
-                                    self.did2predicates_pred[doc_id],
-                                    self.did2mentions_pred[doc_id],
-                                    self.did2bridgings_pred[doc_id],
-                                    document_pred,
-                                    fh=writer)
-                    writer.write('\n')
-                writer.write('</pre>\n</tr>\n')
+    @property
+    def bridging(self):
+        """Whether self includes the score of bridging anaphora resolution."""
+        return self.measures_bridging is not None
 
-                writer.write('</table>\n')
-            writer.write('</pre>\n')
-            writer.write('</body>\n')
-            writer.write('</html>\n')
+    @property
+    def coreference(self):
+        """Whether self includes the score of coreference resolution."""
+        return self.measure_coref is not None
 
-    @staticmethod
-    def _html_header():
-        return textwrap.dedent('''
-        <head>
-        <meta charset="utf-8" />
-        <title>Bert Result</title>
-        <style type="text/css">
-        td {
-            font-size: 11pt;
-            border: 1px solid #606060;
-            vertical-align: top;
-            margin: 5pt;
-        }
-        .obi1 {
-            background-color: pink;
-            font-size: 12pt;
-        }
-        pre {
-            font-family: "ＭＳ ゴシック", "Osaka-Mono", "Osaka-等幅", "さざなみゴシック", "Sazanami Gothic", DotumChe,
-            GulimChe, BatangChe, MingLiU, NSimSun, Terminal;
-            white-space: pre;
-        }
-        </style>
-        </head>
-        ''')
-
-    def _draw_tree(self,
-                   sid: str,
-                   predicates: List[Predicate],
-                   mentions: List[Mention],
-                   anaphors: List[Predicate],
-                   document: Document,
-                   fh: Optional[TextIO] = None,
-                   html: bool = True
-                   ) -> None:
-        """sid で指定された文の述語項構造・共参照関係をツリー形式で fh に書き出す
-
-        Args:
-            sid (str): 出力対象の文ID
-            predicates (List[Predicate]): document に含まれる全ての述語
-            mentions (List[Mention]): document に含まれる全ての mention
-            anaphors (List[Predicate]): document に含まれる全ての橋渡し照応詞
-            document (Document): sid が含まれる文書
-            fh (Optional[TextIO]): 出力ストリーム
-            html (bool): html 形式で出力するかどうか
-        """
-        blist: BList = document.sid2sentence[sid].blist
-        with io.StringIO() as string:
-            blist.draw_tag_tree(fh=string, show_pos=False)
-            tree_strings = string.getvalue().rstrip('\n').split('\n')
-        assert len(tree_strings) == len(blist.tag_list())
-        all_midasis = [m.midasi for m in document.mentions.values()]
-        tid2predicate = {predicate.tid: predicate for predicate in predicates if predicate.sid == sid}
-        tid2anaphor = {anaphor.tid: anaphor for anaphor in anaphors if anaphor.sid == sid}
-        for tid in range(len(tree_strings)):
-            cases = []
-            predicate = None
-            if tid in tid2predicate:
-                cases += self.cases
-                predicate = tid2predicate[tid]
-            if tid in tid2anaphor:
-                cases += ['ノ']
-                predicate = tid2anaphor[tid]
-            if predicate is None:
-                continue
-            tree_strings[tid] += '  '
-            arguments = document.get_arguments(predicate)
-            for case in cases:
-                args = arguments[case]
-                if case == 'ガ':
-                    args += arguments['判ガ']
-                if case == 'ノ':
-                    args += arguments['ノ？']
-                color: str = 'gray'
-                result = self.comp_result.get((document.doc_id, predicate.dtid, case), None)
-                if result == 'overt':
-                    color = 'green'
-                elif result in Scorer.DEPTYPE2ANALYSIS.values():
-                    color = 'blue'
-                elif result == 'wrong':
-                    for arg in args:
-                        if isinstance(arg, Argument):
-                            color = 'red'
-                        elif arg.midasi in self.relax_exophors:
-                            color = 'red'
-                targets = set()
-                for arg in args:
-                    target = arg.midasi
-                    if all_midasis.count(arg.midasi) > 1 and isinstance(arg, Argument):
-                        target += str(arg.dtid)
-                    targets.add(target)
-                if html:
-                    tree_strings[tid] += f'<font color="{color}">{",".join(targets)}:{case}</font> '
-                else:
-                    tree_strings[tid] += f'{",".join(targets)}:{case} '
-        if self.coreference:
-            for src_mention in filter(lambda m: m.sid == sid, mentions):
-                tgt_mentions_relaxed = self._filter_mentions(
-                    document.get_siblings(src_mention, relax=True), src_mention)
-                targets = set()
-                for tgt_mention in tgt_mentions_relaxed:
-                    target: str = tgt_mention.midasi
-                    if all_midasis.count(target) > 1:
-                        target += str(tgt_mention.dtid)
-                    targets.add(target)
-                for eid in src_mention.eids:
-                    entity = document.entities[eid]
-                    if entity.exophor in self.relax_exophors.values():
-                        targets.add(entity.exophor)
-                if not targets:
-                    continue
-                result = self.comp_result.get((document.doc_id, src_mention.dtid, '='), None)
-                result2color = {'correct': 'blue', 'wrong': 'red', None: 'gray'}
-                tid = src_mention.tid
-                tree_strings[tid] += '  ＝:'
-                if html:
-                    tree_strings[tid] += f'<span style="background-color:#e0e0e0;color:{result2color[result]}">' \
-                                         + ','.join(targets) + '</span> '
-                else:
-                    tree_strings[tid] += ','.join(targets)
-
-        print('\n'.join(tree_strings), file=fh)
+    def __add__(self, other: 'ScoreResult') -> 'ScoreResult':
+        measures_pas = self.measures_pas + other.measures_pas if self.pas else None
+        measures_bridging = self.measures_bridging + other.measures_bridging if self.bridging else None
+        measure_coref = self.measure_coref + other.measure_coref if self.coreference else None
+        return ScoreResult(measures_pas, measures_bridging, measure_coref)
 
 
+@dataclass
 class Measure:
-    def __init__(self,
-                 denom_pred: int = 0,
-                 denom_gold: int = 0,
-                 correct: int = 0):
-        self.denom_pred = denom_pred
-        self.denom_gold = denom_gold
-        self.correct = correct
+    """A data class to calculate and represent F-measure"""
+    denom_pred: int = 0
+    denom_gold: int = 0
+    correct: int = 0
 
     def __add__(self, other: 'Measure'):
         return Measure(self.denom_pred + other.denom_pred,
                        self.denom_gold + other.denom_gold,
                        self.correct + other.correct)
 
+    def __eq__(self, other: 'Measure'):
+        return self.denom_pred == other.denom_pred and \
+               self.denom_gold == other.denom_gold and \
+               self.correct == other.correct
+
     @property
     def precision(self) -> float:
         if self.denom_pred == 0:
-            logger.warning('zero division at precision')
-            return 0.0
+            return .0
         return self.correct / self.denom_pred
 
     @property
     def recall(self) -> float:
         if self.denom_gold == 0:
-            logger.warning('zero division at recall')
-            return 0.0
+            return .0
         return self.correct / self.denom_gold
 
     @property
     def f1(self) -> float:
         if self.denom_pred + self.denom_gold == 0:
-            logger.warning('zero division at f1')
-            return 0.0
+            return .0
         return 2 * self.correct / (self.denom_pred + self.denom_gold)
 
 
@@ -572,10 +688,8 @@ def main():
                         help='perform bridging anaphora resolution')
     parser.add_argument('--case-string', type=str, default='ガ,ヲ,ニ,ガ２',
                         help='case strings separated by ","')
-    parser.add_argument('--exophors', '--exo', type=str, default='著者,読者,不特定:人',
+    parser.add_argument('--exophors', '--exo', type=str, default='著者,読者,不特定:人,不特定:物',
                         help='exophor strings separated by ","')
-    parser.add_argument('--coref-string', type=str, default='=,=構,=≒,=構≒',
-                        help='coreference strings separated by ","')
     parser.add_argument('--read-prediction-from-pas-tag', action='store_true', default=False,
                         help='use <述語項構造:> tag instead of <rel > tag in prediction files')
     parser.add_argument('--pas-target', choices=['', 'pred', 'noun', 'all'], default='pred',
@@ -586,25 +700,18 @@ def main():
                         help='path to csv file which prediction result is exported (default: None)')
     args = parser.parse_args()
 
-    reader_gold = KyotoReader(
-        Path(args.gold_dir),
-        target_cases='ガ,ヲ,ニ,ガ２,ノ,ノ？,判ガ'.split(','),
-        target_corefs=args.coref_string.split(','),
-        extract_nes=False,
-        use_pas_tag=False,
-    )
+    reader_gold = KyotoReader(Path(args.gold_dir), extract_nes=False, use_pas_tag=False)
     reader_pred = KyotoReader(
         Path(args.prediction_dir),
-        target_cases=reader_gold.target_cases,
-        target_corefs=reader_gold.target_corefs,
         extract_nes=False,
         use_pas_tag=args.read_prediction_from_pas_tag,
     )
-    documents_pred = list(reader_pred.process_all_documents())
-    documents_gold = list(reader_gold.process_all_documents())
+    documents_pred = reader_pred.process_all_documents()
+    documents_gold = reader_gold.process_all_documents()
 
     assert set(args.case_string.split(',')) <= set(CASE2YOMI.keys())
-    msg = '"ノ" found in case string. If you want to perform bridging anaphora resolution, specify "--bridging" option'
+    msg = '"ノ" found in case string. If you want to perform bridging anaphora resolution, specify "--bridging" ' \
+          'option instead'
     assert 'ノ' not in args.case_string.split(','), msg
     scorer = Scorer(documents_pred, documents_gold,
                     target_cases=args.case_string.split(','),
@@ -612,11 +719,12 @@ def main():
                     coreference=args.coreference,
                     bridging=args.bridging,
                     pas_target=args.pas_target)
+    result = scorer.run()
     if args.result_html:
         scorer.write_html(Path(args.result_html))
     if args.result_csv:
-        scorer.export_csv(args.result_csv)
-    scorer.export_txt(sys.stdout)
+        result.export_csv(args.result_csv)
+    result.export_txt(sys.stdout)
 
 
 if __name__ == '__main__':

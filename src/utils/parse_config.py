@@ -15,12 +15,13 @@ LOG_LEVELS = {
 
 
 class ConfigParser:
-    def __init__(self, config, resume=None, run_id=None):
+    def __init__(self, config, result_dir=None, resume=None, run_id=None):
         """
         class to parse configuration json file. Handles hyperparameters for training, initializations of modules,
         checkpoint saving and logging module.
         :param config: Dict containing configurations, hyperparameters for training. contents of `config.json` file
          for example.
+        :param result_dir: path to base directory where checkpoints are saved.
         :param resume: String, path to the checkpoint being loaded.
         :param run_id: Unique Identifier for training processes. Used to save checkpoints and training log.
          Timestamp is being used as default
@@ -35,7 +36,7 @@ class ConfigParser:
         self.run_id = run_id
         if run_id is None:
             self.run_id = datetime.now().strftime(r'%m%d_%H%M%S')  # use timestamp as default run-id
-        self.result_dir = Path(self.config['trainer']['save_dir'])
+        self.result_dir = result_dir or Path(self.config['trainer']['save_dir'])
         self.save_dir.mkdir(parents=True, exist_ok=True)
 
         # save updated config file to the checkpoint dir
@@ -52,12 +53,13 @@ class ConfigParser:
         if args.device is not None:
             os.environ["CUDA_VISIBLE_DEVICES"] = args.device
 
-        resume = ensemble = None
+        result_dir = resume = ensemble = None
         if args.resume is not None:
             resume = Path(args.resume)
             cfg_file = resume.parent / 'config.json'
-            if inherit_save_dir is True and run_id is None:
-                run_id = str(resume.parent.name)
+            if inherit_save_dir is True:
+                result_dir = resume.parents[2]
+                run_id = run_id or str(resume.parent.name)
         elif getattr(args, 'ens', None) is not None:
             cfg_file = next(Path(args.ens).glob('*/config.json'))
             ensemble = args.ens
@@ -75,7 +77,7 @@ class ConfigParser:
                 if run_id is None:
                     run_id = str(resume.parent.parent.name)
 
-        return cls(config, resume=resume, run_id=run_id)
+        return cls(config, result_dir=result_dir, resume=resume, run_id=run_id)
 
     def init_obj(self, name, module, *args, **kwargs):
         """
@@ -86,8 +88,11 @@ class ConfigParser:
         is equivalent to
         `object = module.name(a, b=1)`
         """
-        module_name = self[name]['type']
-        module_args = dict(self[name]['args'])
+        cfg = self
+        for sub in name.split('.'):
+            cfg = cfg[sub]
+        module_name = cfg['type']
+        module_args = dict(cfg['args'])
         assert all([k not in module_args for k in kwargs]), 'Overwriting kwargs given in config file is not allowed'
         module_args.update(kwargs)
         return getattr(module, module_name)(*args, **module_args)

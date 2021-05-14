@@ -89,5 +89,5 @@ class Inference:
     @staticmethod
     def _softmax(x: np.ndarray, axis: int):
         """Compute softmax values for each sets of scores in x."""
-        e_x = np.exp(x - np.max(x))
+        e_x = np.exp(x - np.max(x, axis=axis, keepdims=True))
         return e_x / (e_x.sum(axis=axis, keepdims=True) + 1e-8)

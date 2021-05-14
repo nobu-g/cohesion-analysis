@@ -1,32 +1,31 @@
+import re
 import argparse
 from pathlib import Path
-from typing import List, Callable, Set
+from typing import List, Callable, Set, Dict
 
 import numpy as np
 import torch.nn as nn
-from torch.utils.data import DataLoader
 from sklearn.metrics import f1_score
 
 import data_loader.data_loaders as module_loader
 import data_loader.dataset as module_dataset
 import model.metric as module_metric
 import model.model as module_arch
+from data_loader.dataset import PASDataset
 from utils.parse_config import ConfigParser
 from prediction.prediction_writer import PredictionKNPWriter
 from prediction.inference import Inference
-from scorer import Scorer
+from scorer import Scorer, ScoreResult
 
 
 class Tester:
-    def __init__(self, model, metrics, config, kwdlc_data_loader, kc_data_loader, commonsense_data_loader,
-                 target, logger, predict_overt, precision_threshold, recall_threshold, result_suffix):
+    def __init__(self, model, metrics, config, data_loaders, eval_set, logger, predict_overt, precision_threshold,
+                 recall_threshold, result_suffix):
         self.model: nn.Module = model
         self.metrics: List[Callable] = metrics
         self.config = config
-        self.kwdlc_data_loader = kwdlc_data_loader
-        self.kc_data_loader = kc_data_loader
-        self.commonsense_data_loader = commonsense_data_loader
-        self.target: str = target
+        self.data_loaders = data_loaders
+        self.eval_set: str = eval_set
         self.logger = logger
         self.predict_overt: bool = predict_overt
 
@@ -35,13 +34,12 @@ class Tester:
                                    recall_threshold=recall_threshold,
                                    logger=logger)
 
-        self.save_dir: Path = config.save_dir / f'eval_{target}{result_suffix}'
+        self.save_dir: Path = config.save_dir / f'eval_{eval_set}{result_suffix}'
         self.save_dir.mkdir(exist_ok=True)
         pas_targets: Set[str] = set()
-        if kwdlc_data_loader is not None:
-            pas_targets |= set(kwdlc_data_loader.dataset.pas_targets)
-        if kc_data_loader is not None:
-            pas_targets |= set(kc_data_loader.dataset.pas_targets)
+        for corpus, data_loader in self.data_loaders.items():
+            if corpus != 'commonsense':
+                pas_targets |= set(data_loader.dataset.pas_targets)
         self.pas_targets: List[str] = []
         if 'pred' in pas_targets:
             self.pas_targets.append('pred')
@@ -54,70 +52,73 @@ class Tester:
 
     def test(self):
         log = {}
-        if self.kwdlc_data_loader is not None:
-            log.update(self._test(self.kwdlc_data_loader, 'kwdlc'))
-        if self.kc_data_loader is not None:
-            log.update(self._test(self.kc_data_loader, 'kc'))
-        if self.commonsense_data_loader is not None:
-            log.update(self._test(self.commonsense_data_loader, 'commonsense'))
+        all_result: Dict[str, ScoreResult] = {}
+        for corpus, data_loader in self.data_loaders.items():
+            corpus_result = self._test(data_loader, corpus)
+            log[f'{self.eval_set}_{corpus}_loss'] = corpus_result.pop('loss')
+            for pas_target, result in corpus_result.items():
+                if pas_target not in all_result:
+                    all_result[pas_target] = result
+                else:
+                    all_result[pas_target] += result
+                for met, value in zip(self.metrics, self._eval_metrics(result.to_dict())):
+                    met_name = met.__name__
+                    if 'case_analysis' in met_name or 'zero_anaphora' in met_name:
+                        met_name = f'{pas_target}_{met_name}'
+                    log[f'{self.eval_set}_{corpus}_{met_name}'] = value
+
+        for pas_target, result in all_result.items():
+            for met, value in zip(self.metrics, self._eval_metrics(result.to_dict())):
+                met_name = met.__name__
+                if 'case_analysis' in met_name or 'zero_anaphora' in met_name:
+                    met_name = f'{pas_target}_{met_name}'
+                log[f'{self.eval_set}_all_{met_name}'] = value
+            target = 'all' + (f'_{pas_target}' if pas_target else '')
+            result.export_txt(self.save_dir / f'{target}.txt')
+            result.export_csv(self.save_dir / f'{target}.csv')
+
         return log
 
-    def _test(self, data_loader: DataLoader, label: str):
+    def _test(self, data_loader, corpus: str):
 
         loss, *predictions = self.inference(data_loader)
 
         log = {}
-        if label in ('kwdlc', 'kc'):
+        if corpus != 'commonsense':
             prediction = predictions[0]  # (N, seq, case, seq)
-            result = self._eval_pas(prediction.tolist(), data_loader, corpus=label)
-        elif label == 'commonsense':
+            result = self._eval_pas(prediction.tolist(), data_loader.dataset, corpus=corpus)
+        else:
             assert self.config['arch']['type'] == 'CommonsenseModel'
             result = self._eval_commonsense(predictions[1].tolist(), data_loader)
-        else:
-            raise ValueError(f'unknown label: {label}')
-        result['loss'] = loss
-
-        log.update({f'{self.target}_{label}_{k}': v for k, v in result.items()})
+        log.update(result)
+        log['loss'] = loss
         return log
 
-    def _eval_pas(self, arguments_set, data_loader, corpus: str, suffix: str = ''):
+    def _eval_pas(self, arguments_set, dataset: PASDataset, corpus: str, suffix: str = '') -> Dict[str, ScoreResult]:
         prediction_output_dir = self.save_dir / f'{corpus}_out{suffix}'
-        prediction_writer = PredictionKNPWriter(data_loader.dataset,
+        prediction_writer = PredictionKNPWriter(dataset,
                                                 self.logger,
-                                                use_gold_overt=(not self.predict_overt))
-        documents_pred = prediction_writer.write(arguments_set, prediction_output_dir)
-        if corpus == 'kc':
-            documents_gold = data_loader.dataset.joined_documents
-        else:
-            documents_gold = data_loader.dataset.documents
+                                                use_knp_overt=(not self.predict_overt))
+        documents_pred = prediction_writer.write(arguments_set, prediction_output_dir, add_pas_tag=False)
 
-        result = {}
+        log = {}
         for pas_target in self.pas_targets:
-            scorer = Scorer(documents_pred, documents_gold,
-                            target_cases=data_loader.dataset.target_cases,
-                            target_exophors=data_loader.dataset.target_exophors,
-                            coreference=data_loader.dataset.coreference,
-                            bridging=data_loader.dataset.bridging,
+            scorer = Scorer(documents_pred, dataset.gold_documents,
+                            target_cases=dataset.target_cases,
+                            target_exophors=dataset.target_exophors,
+                            coreference=dataset.coreference,
+                            bridging=dataset.bridging,
                             pas_target=pas_target)
+            result = scorer.run()
+            target = corpus + (f'_{pas_target}' if pas_target else '') + suffix
 
-            stem = corpus
-            if pas_target:
-                stem += f'_{pas_target}'
-            stem += suffix
-            if self.target != 'test':
-                scorer.write_html(self.save_dir / f'{stem}.html')
-            scorer.export_txt(self.save_dir / f'{stem}.txt')
-            scorer.export_csv(self.save_dir / f'{stem}.csv')
+            scorer.write_html(self.save_dir / f'{target}.html')
+            result.export_txt(self.save_dir / f'{target}.txt')
+            result.export_csv(self.save_dir / f'{target}.csv')
 
-            metrics = self._eval_metrics(scorer.result_dict())
-            for met, value in zip(self.metrics, metrics):
-                met_name = met.__name__
-                if 'case_analysis' in met_name or 'zero_anaphora' in met_name:
-                    if pas_target:
-                        met_name = f'{pas_target}_{met_name}'
-                result[met_name] = value
+            log[pas_target] = result
 
-        return result
+        return log
 
     def _eval_metrics(self, result: dict):
         f1_metrics = np.zeros(len(self.metrics))
@@ -136,38 +137,30 @@ def main(config, args):
     logger = config.get_logger(args.target)
 
     # setup data_loader instances
-    expanded_vocab_size = None
-    kwdlc_data_loader = None
-    if config[f'{args.target}_kwdlc_dataset'] is not None:
-        dataset = config.init_obj(f'{args.target}_kwdlc_dataset', module_dataset, logger=logger)
-        kwdlc_data_loader = config.init_obj(f'{args.target}_data_loader', module_loader, dataset)
-        expanded_vocab_size = dataset.expanded_vocab_size
-    kc_data_loader = None
-    if config[f'{args.target}_kc_dataset'] is not None:
-        dataset = config.init_obj(f'{args.target}_kc_dataset', module_dataset, logger=logger)
-        kc_data_loader = config.init_obj(f'{args.target}_data_loader', module_loader, dataset)
-        expanded_vocab_size = dataset.expanded_vocab_size
-    commonsense_data_loader = None
-    if config.config.get(f'{args.target}_commonsense_dataset', None) is not None:
-        dataset = config.init_obj(f'{args.target}_commonsense_dataset', module_dataset, logger=logger)
-        commonsense_data_loader = config.init_obj(f'{args.target}_data_loader', module_loader, dataset)
+    data_loaders = {}
+    for corpus in config[f'{args.target}_datasets'].keys():
+        if args.oracle is True:
+            assert config[f'{args.target}_datasets'][corpus]['args']['path'].endswith(args.target)
+            config[f'{args.target}_datasets'][corpus]['args']['path'] += '_oracle'
+        dataset = config.init_obj(f'{args.target}_datasets.{corpus}', module_dataset, logger=logger)
+        data_loaders[corpus] = config.init_obj(f'data_loaders.{args.target}', module_loader, dataset)
 
     # build model architecture
-    model: nn.Module = config.init_obj('arch', module_arch, vocab_size=expanded_vocab_size)
+    model: nn.Module = config.init_obj('arch', module_arch)
     logger.info(model)
 
     # get function handles of metrics
     metric_fns = [getattr(module_metric, met) for met in config['metrics']]
 
-    tester = Tester(model, metric_fns, config, kwdlc_data_loader, kc_data_loader, commonsense_data_loader,
-                    args.target, logger, args.predict_overt, args.precision_threshold, args.recall_threshold,
-                    args.result_suffix)
+    tester = Tester(model, metric_fns, config, data_loaders, args.target, logger, args.predict_overt,
+                    args.precision_threshold, args.recall_threshold, args.result_suffix)
 
     log = tester.test()
 
     # print logged information to the screen
+    key_max = max(len(s) for s in log.keys())
     for key, value in log.items():
-        logger.info('{:42s}: {:.4f}'.format(str(key), value))
+        logger.info(f'{key:{key_max}s}: {value:.4f}')
 
 
 if __name__ == '__main__':
@@ -193,6 +186,8 @@ if __name__ == '__main__':
                         help='custom evaluation result directory name')
     parser.add_argument('--run-id', default=None, type=str,
                         help='custom experiment directory name')
+    parser.add_argument('--oracle', action='store_true', default=False,
+                        help='use oracle dependency labels')
     parsed_args = parser.parse_args()
     inherit_save_dir = (parsed_args.resume is not None and parsed_args.run_id is None)
     main(ConfigParser.from_args(parsed_args, run_id=parsed_args.run_id, inherit_save_dir=inherit_save_dir), parsed_args)

@@ -12,6 +12,7 @@ class PASDataLoader(DataLoader):
                  batch_size: int,
                  shuffle: bool,
                  num_workers: int,
+                 pin_memory: bool,
                  ):
         init_kwargs = {
             'dataset': dataset,
@@ -19,7 +20,7 @@ class PASDataLoader(DataLoader):
             'shuffle': shuffle,
             'collate_fn': broadcast_collate_fn,
             'num_workers': num_workers,
-            'pin_memory': True,
+            'pin_memory': pin_memory,
         }
         super().__init__(**init_kwargs)
 

@@ -15,6 +15,7 @@ class CAModel(nn.Module):
                  dropout: float,
                  num_case: int,
                  coreference: bool,
+                 **_
                  ) -> None:
         super().__init__()
 

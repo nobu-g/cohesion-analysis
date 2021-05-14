@@ -5,6 +5,8 @@ from collections import OrderedDict
 from transformers import BertTokenizer
 from kyoto_reader import Document, BasePhrase, BaseArgument, Argument, SpecialArgument, UNCERTAIN
 
+from utils.util import is_pas_target, is_bridging_target, is_coreference_target
+
 logger = logging.getLogger(__file__)
 
 
@@ -29,6 +31,7 @@ class PasExample:
              exophors: List[str],
              coreference: bool,
              bridging: bool,
+             relations: List[str],
              kc: bool,
              pas_targets: List[str],
              tokenizer: BertTokenizer,
@@ -36,7 +39,6 @@ class PasExample:
         self.doc_id = document.doc_id
         process_all = (kc is False) or (document.doc_id.split('-')[-1] == '00')
         last_sent = document.sentences[-1] if len(document) > 0 else None
-        relations = cases + (['ノ'] if bridging else []) + (['='] if coreference else [])
         relax_exophors = {}
         for exophor in exophors:
             relax_exophors[exophor] = exophor
@@ -48,8 +50,8 @@ class PasExample:
         head_dmids = []
         for sentence in document:
             process: bool = process_all or (sentence is last_sent)
-            head_dmids += [bp.dmid for bp in sentence.bp_list()]
-            for bp in sentence.bp_list():
+            head_dmids += [bp.dmid for bp in sentence.bps]
+            for bp in sentence.bps:
                 for mrph in bp.mrph_list():
                     self.words.append(mrph.midasi)
                     self.dtids.append(bp.dtid)
@@ -57,23 +59,20 @@ class PasExample:
                     arguments = OrderedDict((rel, []) for rel in relations)
                     arg_candidates = ment_candidates = []
                     if document.mrph2dmid[mrph] == bp.dmid and process is True:
-                        if ('pred' in pas_targets and '用言' in bp.tag.features) or \
-                                ('noun' in pas_targets and '非用言格解析' in bp.tag.features):
+                        if is_pas_target(bp, verbal=('pred' in pas_targets), nominal=('noun' in pas_targets)):
                             arg_candidates = [x for x in head_dmids if x != bp.dmid]
                             for case in cases:
                                 dmid2args = {dmid: arguments[case] for dmid, arguments in dmid2arguments.items()}
                                 arguments[case] = self._get_args(bp.dmid, dmid2args, relax_exophors, arg_candidates)
 
-                        if 'ノ' in relations:
+                        if bridging and is_bridging_target(bp):
                             arg_candidates = [x for x in head_dmids if x != bp.dmid]
-                            if '体言' in bp.tag.features and '非用言格解析' not in bp.tag.features:
-                                dmid2args = {dmid: arguments['ノ'] for dmid, arguments in dmid2arguments.items()}
-                                arguments['ノ'] = self._get_args(bp.dmid, dmid2args, relax_exophors, arg_candidates)
+                            dmid2args = {dmid: arguments['ノ'] for dmid, arguments in dmid2arguments.items()}
+                            arguments['ノ'] = self._get_args(bp.dmid, dmid2args, relax_exophors, arg_candidates)
 
-                        if '=' in relations:
-                            if '体言' in bp.tag.features:
-                                ment_candidates = [x for x in head_dmids if x < bp.dmid]
-                                arguments['='] = self._get_mentions(bp, document, relax_exophors, ment_candidates)
+                        if coreference and is_coreference_target(bp):
+                            ment_candidates = [x for x in head_dmids if x < bp.dmid]  # do not solve cataphora
+                            arguments['='] = self._get_mentions(bp, document, relax_exophors, ment_candidates)
 
                     self.arguments_set.append(arguments)
                     self.arg_candidates_set.append(arg_candidates)
@@ -112,7 +111,7 @@ class PasExample:
         for arg in args:
             if isinstance(arg, Argument):
                 if arg.dmid not in candidates:
-                    logger.debug(f'argument: {arg.midasi} in {self.doc_id} is not in candidates and ignored')
+                    logger.debug(f'argument: {arg} in {self.doc_id} is not in candidates and ignored')
                     continue
                 string = str(arg.dmid)
                 if arg.dep_type == 'overt':
@@ -124,7 +123,7 @@ class PasExample:
                     string += '%O'
             # exophor
             else:
-                string = arg.midasi
+                string = str(arg)
             arg_strings.append(string)
         return arg_strings
 
@@ -142,7 +141,7 @@ class PasExample:
                         if document.entities[eid].is_special]
             for mention in tgt_mentions:
                 if mention.dmid not in candidates:
-                    logger.debug(f'mention: {mention.midasi} in {self.doc_id} is not in candidates and ignored')
+                    logger.debug(f'mention: {mention} in {self.doc_id} is not in candidates and ignored')
                     continue
                 ment_strings.append(str(mention.dmid))
             for exophor in exophors:
@@ -150,10 +149,8 @@ class PasExample:
                     ment_strings.append(relax_exophors[exophor])  # 不特定:人１ -> 不特定:人
             if ment_strings:
                 return ment_strings
-            elif tgt_mentions:
-                return []  # don't train cataphor
             else:
-                return ['NA']
+                return ['NA']  # force cataphor to point [NA]
         else:
             return ['NA']
 

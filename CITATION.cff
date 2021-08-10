@@ -1,0 +1,9 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it using these metadata."
+title: "cohesion-analysis: A BERT based Japanese cohesion analyzer"
+authors:
+  - family-names: Ueda
+    given-names: Nobuhiro
+version: 1.0.0
+license: MIT
+repository-code: "https://github.com/nobu-g/cohesion-analysis"

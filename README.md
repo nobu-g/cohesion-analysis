@@ -22,7 +22,7 @@ For more information, please refer to [the original paper](#reference)
 
 ## Demo
 
-<https://lotus.kuee.kyoto-u.ac.jp/cohesion-analysis/public/>
+<https://lotus.kuee.kyoto-u.ac.jp/cohesion-analysis/pub/>
 
 <img width="910" alt="demo-view" src="https://user-images.githubusercontent.com/25974220/103130065-7e43f900-46de-11eb-8d26-6226e498b6d0.png">
 

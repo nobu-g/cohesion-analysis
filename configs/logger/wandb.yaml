@@ -1,0 +1,11 @@
+_target_: lightning.pytorch.loggers.WandbLogger
+name: ${name}
+save_dir: ${save_dir}
+project: ${oc.env:WANDB_PROJECT,cohesion}
+log_model: false
+group: ${name}
+tags:
+  - ${config_name}
+settings:
+  _target_: wandb.Settings
+  start_method: fork

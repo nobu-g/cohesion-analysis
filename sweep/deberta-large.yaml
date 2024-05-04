@@ -1,0 +1,21 @@
+project: cohesion
+entity: ueda
+program: src/train.py
+method: bayes
+metric:
+  name: val_cohesion/all
+  goal: maximize
+parameters:
+  effective_batch_size:
+    values: [8, 16, 24, 32]
+  epochs:
+    values: [8, 12, 16, 20]
+  warmup_steps:
+    values: [100, 500, 1000]
+command:
+  - ${env}
+  - ${interpreter}
+  - ${program}
+  - "-cn"
+  - "deberta-large"
+  - ${args_no_hyphens}

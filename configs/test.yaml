@@ -1,0 +1,40 @@
+defaults:
+  - _self_
+  - callbacks: [progress_bar]
+
+checkpoint: null  # path to trained checkpoint
+eval_set: test  # or valid
+# Threshold for analysis target prediction probability. If the probability is lower than this value, the base phrase is
+# not analyzed.
+analysis_target_threshold: 0.3
+
+eval_dir: ${run_dir}/eval_${eval_set}_${hydra:job.override_dirname}
+pred_dir: ${run_dir}/pred_${eval_set}_${hydra:job.override_dirname}
+gold_dir: ${run_dir}/gold_${eval_set}
+
+# environment-dependent settings
+devices: ${oc.env:DEVICES,0}
+max_batches_per_device: ${oc.env:MAX_BATCHES_PER_DEVICE,4}
+num_workers: ${oc.env:NUM_WORKERS,4}
+compile: ${oc.env:COMPILE,false}
+
+hydra:
+  job:
+    config:
+      override_dirname:
+        kv_sep: '_'
+        item_sep: '-'
+        exclude_keys:
+          - seed
+          - name
+          - exp_dir
+          - run_dir
+          - checkpoint
+          - eval_set
+          - eval_dir
+          - pred_dir
+          - gold_dir
+          - devices
+          - max_batches_per_device
+          - num_workers
+          - compile

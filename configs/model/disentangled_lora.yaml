@@ -1,0 +1,6 @@
+_target_: modules.model.model.LoRARelationWiseWordSelectionHead
+model_name_or_path: ${model_name_or_path}
+exophora_referents: ${exophora_referents}
+hidden_dropout_prob: 0.05
+num_tasks: ${len:${tasks}}
+rank: 2

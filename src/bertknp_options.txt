@@ -1,7 +1,0 @@
---max_seq_length 192
---prediction_result_filename -
---do_predict
---parsing
---knp_mode
---input_format knp
---predict_batch_size 32

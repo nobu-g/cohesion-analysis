@@ -5,15 +5,19 @@ from pathlib import Path
 
 import pytest
 import torch
-from kyoto_reader import ALL_CASES, ALL_COREFS
-from kyoto_reader import KyotoReader
+from omegaconf import ListConfig
+from rhoknp import Document
+from transformers import AutoTokenizer, PreTrainedTokenizerBase
 
 here = Path(__file__).parent
-sys.path.append(str(here.parent / 'src'))
+sys.path.append(str(here.parent / "src"))
 
-from data_loader.dataset import PASDataset
+from datamodule.dataset import CohesionDataset  # noqa: E402
 
-INF = 2 ** 10
+INF = 2**10
+DATA_DIR = here / "data"
+
+os.environ["COHESION_DISABLE_CACHE"] = "1"
 
 
 @pytest.fixture()
@@ -66,72 +70,99 @@ def fixture_input_tensor():
                     [-INF, -INF, -INF, -INF, -INF, -INF, -INF],  # coref
                 ],  # [NA]
             ],  # コイントスを行う
-        ]
+        ],
     )
-    yield input_tensor
+    return input_tensor
 
 
 @pytest.fixture()
 def fixture_documents_pred():
-    reader = KyotoReader(here / 'data' / 'pred',
-                         target_cases=ALL_CASES,
-                         target_corefs=ALL_COREFS)
-    yield reader.process_all_documents()
+    return [Document.from_knp(path.read_text()) for path in sorted(DATA_DIR.joinpath("pred").glob("*.knp"))]
 
 
 @pytest.fixture()
 def fixture_documents_gold():
-    reader = KyotoReader(here / 'data' / 'gold',
-                         target_cases=ALL_CASES,
-                         target_corefs=ALL_COREFS)
-    yield reader.process_all_documents()
+    return [Document.from_knp(path.read_text()) for path in sorted(DATA_DIR.joinpath("gold").glob("*.knp"))]
 
 
 @pytest.fixture()
 def fixture_scores():
-    with here.joinpath('data/expected/score/0.json').open() as f:
+    with DATA_DIR.joinpath("expected/score/0.json").open() as f:
         yield json.load(f)
 
 
 @pytest.fixture()
-def fixture_train_dataset() -> PASDataset:
-    dataset = PASDataset(
-        here / 'data/knp',
-        cases=['ガ', 'ヲ', 'ニ', 'ガ２'],
-        exophors=['著者', '読者', '不特定:人', '不特定:物'],
-        coreference=True,
-        bridging=True,
+def exophora_referents() -> list[str]:
+    return ["著者", "読者", "不特定:人", "不特定:物"]
+
+
+@pytest.fixture()
+def pas_cases() -> list[str]:
+    return ["ガ", "ヲ", "ニ", "ガ２"]
+
+
+@pytest.fixture()
+def bar_rels() -> list[str]:
+    return ["ノ"]
+
+
+@pytest.fixture()
+def special_tokens(exophora_referents: list[str]) -> list[str]:
+    return [*[f"[{er}]" for er in exophora_referents], "[NULL]", "[NA]"]
+
+
+@pytest.fixture()
+def tokenizer(special_tokens: list[str]) -> PreTrainedTokenizerBase:
+    return AutoTokenizer.from_pretrained("ku-nlp/deberta-v2-tiny-japanese", additional_special_tokens=special_tokens)
+
+
+@pytest.fixture()
+def fixture_train_dataset(
+    pas_cases: list[str],
+    bar_rels: list[str],
+    special_tokens: list[str],
+    exophora_referents: list[str],
+    tokenizer: PreTrainedTokenizerBase,
+) -> CohesionDataset:
+    dataset = CohesionDataset(
+        DATA_DIR / "knp",
+        tasks=ListConfig(["pas", "bridging", "coreference"]),
+        cases=ListConfig(pas_cases),
+        bar_rels=ListConfig(bar_rels),
         max_seq_length=128,
-        bert_path=os.environ['BERT_PATH'],
+        document_split_stride=1,
+        special_tokens=ListConfig(special_tokens),
+        exophora_referents=ListConfig(exophora_referents),
         training=True,
-        kc=False,
-        train_targets=['overt', 'dep', 'zero'],
-        pas_targets=['pred', 'noun'],
-        gold_path=here / 'data/knp',
+        tokenizer=tokenizer,
     )
     return dataset
 
 
 @pytest.fixture()
-def fixture_eval_dataset() -> PASDataset:
-    dataset = PASDataset(
-        here / 'data/reparsed',
-        cases=['ガ', 'ヲ', 'ニ', 'ガ２'],
-        exophors=['著者', '読者', '不特定:人', '不特定:物'],
-        coreference=True,
-        bridging=True,
+def fixture_eval_dataset(
+    pas_cases: list[str],
+    bar_rels: list[str],
+    special_tokens: list[str],
+    exophora_referents: list[str],
+    tokenizer: PreTrainedTokenizerBase,
+) -> CohesionDataset:
+    dataset = CohesionDataset(
+        DATA_DIR / "knp",
+        tasks=ListConfig(["pas", "bridging", "coreference"]),
+        cases=ListConfig(pas_cases),
+        bar_rels=ListConfig(bar_rels),
         max_seq_length=128,
-        bert_path=os.environ['BERT_PATH'],
-        training=True,
-        kc=False,
-        train_targets=['overt', 'dep', 'zero'],
-        pas_targets=['pred', 'noun'],
-        gold_path=here / 'data/knp',
+        document_split_stride=1,
+        special_tokens=ListConfig(special_tokens),
+        exophora_referents=ListConfig(exophora_referents),
+        training=False,
+        tokenizer=tokenizer,
     )
     return dataset
 
 
 @pytest.fixture()
 def fixture_example1():
-    with here.joinpath('data/expected/example/1.json').open() as f:
+    with DATA_DIR.joinpath("expected/example/1.json").open() as f:
         yield json.load(f)

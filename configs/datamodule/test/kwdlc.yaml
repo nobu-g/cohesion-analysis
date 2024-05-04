@@ -1,0 +1,6 @@
+defaults:
+  - /datamodule/base/base.yaml@kwdlc
+
+kwdlc:
+  knp_path: ${dataset_path}/kwdlc/test
+  training: false

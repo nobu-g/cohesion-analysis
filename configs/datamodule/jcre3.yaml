@@ -1,0 +1,12 @@
+defaults:
+  - train:
+      - jcre3.yaml
+  - valid:
+      - jcre3.yaml
+  - test:
+      - jcre3.yaml
+  - predict:
+      - custom.yaml
+
+batch_size: ${max_batches_per_device}
+num_workers: ${num_workers}

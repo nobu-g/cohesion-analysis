@@ -1,0 +1,6 @@
+defaults:
+  - /datamodule/base/base.yaml@kc
+
+kc:
+  knp_path: ${dataset_path}/kc/train
+  training: true

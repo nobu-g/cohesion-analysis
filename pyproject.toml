@@ -1,37 +1,88 @@
 [tool.poetry]
+package-mode = false
 name = "cohesion-analysis"
-version = "1.0.0"
-description = "BERT based Japanese cohesion analyser"
-authors = ["Nobuhiro Ueda <ueda@nlp.ist.i.kyoto-u.ac.jp>"]
+version = "2.0.0"
+description = "Cohesion analyzer for Japanese text"
 license = "MIT"
+authors = ["Nobuhiro Ueda <ueda@nlp.ist.i.kyoto-u.ac.jp>"]
+maintainers = ["Nobuhiro Ueda <ueda@nlp.ist.i.kyoto-u.ac.jp>"]
+readme = "README.md"
+repository = "https://github.com/nobu-g/cohesion"
+keywords = [
+    "NLP",
+    "Japanese",
+    "PAS analysis",
+    "coreference resolution",
+    "bridging anaphora resolution",
+]
 
 [tool.poetry.dependencies]
-python = "^3.7.2"
-torch = "1.7.1"
-transformers = "2.10"
-pyknp = "^0.4"
-textformatting = { git = "https://github.com/ku-nlp/python-textformatting.git", branch = "master" }
-kyoto-reader = "^2.1"
-numpy = "^1.18"
-tqdm = "^4.43"
-scikit-learn = "^0.23"
-jaconv = "^0.2"
-tensorboard = "^2.2"
-pandas = "^1.0"
-ordered-set = "^4.0"
-Jinja2 = "^2.11"
+python = "^3.9"
+torch = "~2.1.1"
+transformers = { version = "~4.35.2", extras = ["sentencepiece"] }
+tokenizers = "^0.15.0"
+lightning = "~2.1.0"
+torchmetrics = "^1.0"
+omegaconf = "^2.3"
+hydra-core = "^1.3"
+rhoknp = { version = "~1.7.0", extras = ["cli"] }
+dataclasses-json = "^0.6.1"
+pandas = "^2.0"
+rich = "^13.3"
+wandb = "^0.16.0"
+jaconv = "^0.3.4"
+cohesion-tools = "^0.7.1"
+typing-extensions = ">=4.4"
 
-[tool.poetry.dev-dependencies]
-ipython = "*"
-ipdb = "*"
-pytest = "^6.1"
-jupyterlab = "^2.2"
+[tool.poetry.group.server.dependencies]
+uvicorn = ">=0.22.0"
+fastapi = ">=0.95.1"
+pyhumps = "^3.8"
+
+[tool.poetry.group.dev.dependencies]
+ipdb = "^0.13.9"
+pytest = "^7.2"
+
+[tool.ruff]
+line-length = 120
+indent-width = 4
+target-version = "py39"  # The minimum Python version to target
+src = ["src"]
+
+[tool.ruff.lint]
+select = ["F", "E", "W", "I", "B", "PL", "PD", "NPY", "RUF", "UP", "TID", "COM", "PT", "ARG", "PYI"]
+ignore = [
+    "PLR0912",  # Too many branches
+    "PLR0913",  # Too many arguments in function definition
+    "PLR0915",  # Too many statements
+    "PLR2004",  # Magic value used in comparison
+    "E501",  # Line too long
+    "RUF001",  # String contains ambiguous `ノ` (KATAKANA LETTER NO). Did you mean `/` (SOLIDUS)?
+    "RUF002",  # Docstring contains ambiguous `，` (FULLWIDTH COMMA). Did you mean `,` (COMMA)?
+    "RUF003",  # Comment contains ambiguous `，` (FULLWIDTH COMMA). Did you mean `,` (COMMA)?
+    "COM812",  # Trailing comma missing
+    "ANN002",  # Missing type annotation for `*args`
+    "ANN003",  # Missing type annotation for `**kwargs`
+    "ANN101",  # Missing type annotation for `self` in method
+    "ANN102",  # Missing type annotation for `cls` in classmethod
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["ANN"]
+
+[tool.ruff.lint.flake8-tidy-imports]
+ban-relative-imports = "all"
+
+[tool.ruff.pydocstyle]
+convention = "google"
+
+[tool.black]
+line-length = 120
+target-version = ["py39", "py310", "py311", "py312"]
+
+[tool.mypy]
+python_version = 3.9
 
 [build-system]
-requires = ["poetry>=0.12"]
-build-backend = "poetry.masonry.api"
-
-[tool.pytest.ini_options]
-filterwarnings = [
-    "ignore::DeprecationWarning",
-]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

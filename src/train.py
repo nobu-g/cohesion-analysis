@@ -1,76 +1,97 @@
-import argparse
-import random
+import logging
+import math
+import warnings
+from collections.abc import Mapping
+from pathlib import Path
+from test import save_results
+from typing import Union
 
-import numpy as np
+import hydra
+import lightning.pytorch as pl
 import torch
-import torch.nn as nn
-from torch.utils.data import ConcatDataset
-import transformers.optimization as module_optim
+import transformers.utils.logging as hf_logging
+import wandb
+from lightning.pytorch.callbacks import Callback
+from lightning.pytorch.loggers import Logger
+from lightning.pytorch.utilities.warnings import PossibleUserWarning
+from omegaconf import DictConfig, ListConfig, OmegaConf
 
-import data_loader.dataset as module_dataset
-import model.metric as module_metric
-import model.model as module_arch
-from utils.parse_config import ConfigParser
-from trainer import Trainer
+from datamodule.datamodule import CohesionDataModule
+from modules import CohesionModule
+from utils.util import current_datetime_string
 
-
-def main(config: ConfigParser, args: argparse.Namespace):
-    torch.manual_seed(args.seed)
-    random.seed(args.seed)
-    np.random.seed(args.seed)
-    torch.backends.cudnn.benchmark = True
-    # torch.backends.cudnn.deterministic = True
-    # torch.autograd.set_detect_anomaly(True)
-
-    logger = config.get_logger('train')
-
-    # setup data_loader instances
-    train_datasets = []
-    for corpus in config['train_datasets'].keys():
-        train_datasets.append(config.init_obj(f'train_datasets.{corpus}', module_dataset, logger=logger))
-    train_dataset = ConcatDataset(train_datasets)
-
-    valid_datasets = {}
-    for corpus in config['valid_datasets'].keys():
-        valid_datasets[corpus] = config.init_obj(f'valid_datasets.{corpus}', module_dataset, logger=logger)
-
-    # build model architecture, then print to console
-    model: nn.Module = config.init_obj('arch', module_arch)
-    logger.info(model)
-
-    # get function handles of metrics
-    metrics = [getattr(module_metric, met) for met in config['metrics']]
-
-    # build optimizer, learning rate scheduler
-    trainable_named_params = filter(lambda x: x[1].requires_grad, model.named_parameters())
-    no_decay = ('bias', 'LayerNorm.weight')
-    optimizer_grouped_parameters = [
-        {'params': [p for n, p in trainable_named_params if not any(nd in n for nd in no_decay)],
-         'weight_decay': config['optimizer']['args']['weight_decay']},
-        {'params': [p for n, p in trainable_named_params if any(nd in n for nd in no_decay)], 'weight_decay': 0.0}
-    ]
-    optimizer = config.init_obj('optimizer', module_optim, optimizer_grouped_parameters)
-
-    lr_scheduler = config.init_obj('lr_scheduler', module_optim, optimizer)
-
-    trainer = Trainer(model, metrics, optimizer,
-                      config=config,
-                      train_dataset=train_dataset,
-                      valid_datasets=valid_datasets,
-                      lr_scheduler=lr_scheduler)
-
-    trainer.train()
+hf_logging.set_verbosity(hf_logging.ERROR)
+logging.getLogger("rhoknp").setLevel(logging.ERROR)
+warnings.filterwarnings(
+    "ignore",
+    r"It is recommended to use .+ when logging on epoch level in distributed setting to accumulate the metric across "
+    r"devices\.",
+    category=PossibleUserWarning,
+)
+warnings.filterwarnings(
+    "ignore",
+    r"The dataloader, .+, does not have many workers which may be a bottleneck\. Consider increasing the value of the "
+    r"`num_workers` argument` \(try .+ which is the number of cpus on this machine\) in the `DataLoader` init to "
+    r"improve performance\.",
+    category=PossibleUserWarning,
+)
+OmegaConf.register_new_resolver("now", current_datetime_string, replace=True, use_cache=True)
+OmegaConf.register_new_resolver("len", len, replace=True, use_cache=True)
 
 
-if __name__ == '__main__':
-    parser = argparse.ArgumentParser()
-    parser.add_argument('-c', '--config', default=None, type=str,
-                        help='config file path (default: None)')
-    parser.add_argument('-r', '--resume', default=None, type=str,
-                        help='path to latest checkpoint (default: None)')
-    parser.add_argument('-d', '--device', default='', type=str,
-                        help='indices of GPUs to enable (default: "")')
-    parser.add_argument('--seed', type=int, default=42,
-                        help='random seed for initialization')
-    parsed_args = parser.parse_args()
-    main(ConfigParser.from_args(parsed_args), parsed_args)
+@hydra.main(config_path="../configs", config_name="default", version_base=None)
+def main(cfg: DictConfig):
+    if isinstance(cfg.devices, str):
+        cfg.devices = list(map(int, cfg.devices.split(","))) if "," in cfg.devices else int(cfg.devices)
+    if isinstance(cfg.max_batches_per_device, str):
+        cfg.max_batches_per_device = int(cfg.max_batches_per_device)
+    if isinstance(cfg.num_workers, str):
+        cfg.num_workers = int(cfg.num_workers)
+    cfg.seed = pl.seed_everything(seed=cfg.seed, workers=True)
+
+    # Instantiate lightning module
+    model = CohesionModule(hparams=cfg)
+    if cfg.checkpoint:
+        model.load_from_checkpoint(checkpoint_path=hydra.utils.to_absolute_path(cfg.checkpoint))
+    if cfg.compile is True:
+        model = torch.compile(model)  # type: ignore
+
+    # Instantiate lightning loggers
+    logger: Union[Logger, bool] = cfg.get("logger", False) and hydra.utils.instantiate(cfg.get("logger"))
+    # Instantiate lightning callbacks
+    callbacks: list[Callback] = list(map(hydra.utils.instantiate, cfg.get("callbacks", {}).values()))
+
+    # Calculate gradient_accumulation_steps assuming DDP
+    num_devices: int = 1
+    if isinstance(cfg.devices, (list, ListConfig)):
+        num_devices = len(cfg.devices)
+    elif isinstance(cfg.devices, int):
+        num_devices = cfg.devices
+    cfg.trainer.accumulate_grad_batches = math.ceil(
+        cfg.effective_batch_size / (cfg.max_batches_per_device * num_devices),
+    )
+    batches_per_device = cfg.effective_batch_size // (num_devices * cfg.trainer.accumulate_grad_batches)
+    # if effective_batch_size % (accumulate_grad_batches * num_devices) != 0, then
+    # cause an error of at most accumulate_grad_batches * num_devices compared in effective_batch_size
+    # otherwise, no error
+    cfg.effective_batch_size = batches_per_device * num_devices * cfg.trainer.accumulate_grad_batches
+    cfg.datamodule.batch_size = batches_per_device
+
+    # Instantiate lightning trainer
+    trainer: pl.Trainer = hydra.utils.instantiate(cfg.trainer, logger=logger, callbacks=callbacks, devices=cfg.devices)
+
+    # Instantiate lightning datamodule
+    datamodule = CohesionDataModule(cfg=cfg.datamodule)
+
+    # Run training
+    trainer.fit(model=model, datamodule=datamodule)
+
+    # Run test
+    raw_results: list[Mapping[str, float]] = trainer.test(model=model, datamodule=datamodule)
+    save_results(raw_results, Path(cfg.run_dir) / "eval_test")
+
+    wandb.finish()
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,22 @@
+defaults:
+  - _self_
+  - callbacks: [progress_bar]
+
+# Path to checkpoint.
+checkpoint: /somewhere/model.ckpt
+# Sentences to analysis separated by "。". If not specified, use stdin.
+input: null
+# Path to file or directory where documents to analyze exist. Note that the documents must be in KNP format.
+input_path: null
+# Directory where analyzed knp files are exported.
+export_dir: null
+# Threshold for analysis target prediction probability. If the probability is lower than this value, the base phrase is
+# not analyzed.
+analysis_target_threshold: 0.3
+
+
+# environment-dependent settings
+devices: ${oc.env:DEVICES,0}
+max_batches_per_device: ${oc.env:MAX_BATCHES_PER_DEVICE,4}
+num_workers: ${oc.env:NUM_WORKERS,4}
+compile: ${oc.env:COMPILE,false}

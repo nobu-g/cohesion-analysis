@@ -1,0 +1,5 @@
+defaults:
+  - /datamodule/base/base.yaml@
+
+knp_path: null
+training: false

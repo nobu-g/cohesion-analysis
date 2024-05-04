@@ -1,0 +1,19 @@
+# Path to checkpoint.
+checkpoint: /somewhere/model.ckpt
+
+# Host ip address.
+host: 0.0.0.0
+# Host port number.
+port: 12345
+
+models:
+  - name: "RoBERTa BASE"
+    path: /somewhere/model.ckpt
+  - name: "RoBERTa LARGE"
+    path: /somewhere/model.ckpt
+
+# environment-dependent settings
+devices: ${oc.env:DEVICES,1}
+max_batches_per_device: ${oc.env:MAX_BATCHES_PER_DEVICE,4}
+num_workers: ${oc.env:NUM_WORKERS,4}
+compile: ${oc.env:COMPILE,false}

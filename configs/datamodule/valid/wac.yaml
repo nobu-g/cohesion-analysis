@@ -1,0 +1,6 @@
+defaults:
+  - /datamodule/base/base.yaml@wac
+
+wac:
+  knp_path: ${dataset_path}/wac/valid
+  training: false

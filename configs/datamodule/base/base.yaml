@@ -1,0 +1,13 @@
+_target_: datamodule.dataset.cohesion.CohesionDataset
+tasks: ${tasks}
+cases: ${cases}
+bar_rels: ${bar_rels}
+exophora_referents: ${exophora_referents}
+special_tokens: ${special_tokens}
+max_seq_length: ${max_seq_length}
+document_split_stride: ${document_split_stride}
+tokenizer:
+  _target_: transformers.AutoTokenizer.from_pretrained
+  pretrained_model_name_or_path: ${model_name_or_path}
+  additional_special_tokens: ${special_tokens}
+  _convert_: all

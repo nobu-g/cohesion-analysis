@@ -1,0 +1,6 @@
+defaults:
+  - /datamodule/base/base.yaml@fuman
+
+fuman:
+  knp_path: ${dataset_path}/fuman/valid
+  training: false

@@ -1,0 +1,6 @@
+checkpoint:
+  _target_: lightning.pytorch.callbacks.ModelCheckpoint
+  dirpath: ${run_dir}
+  filename: "checkpoint-{epoch}"
+  auto_insert_metric_name: false
+  every_n_epochs: 1

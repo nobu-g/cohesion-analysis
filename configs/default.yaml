@@ -1,0 +1,41 @@
+defaults:
+  - base.yaml
+  - callbacks: [early_stopping, model_checkpoint, model_summary, lr_monitor]
+  - datamodule: all
+  - logger: wandb
+  - model: disentangled_lora
+  - optimizer: adamw
+  - scheduler: cosine_schedule_with_warmup
+  - trainer: default
+  - _self_
+
+dataset_path: ${oc.env:DATA_DIR}
+max_seq_length: 256
+model_name_or_path: "ku-nlp/deberta-v2-large-japanese"
+checkpoint: ""  # path to trained checkpoint
+document_split_stride: 2
+analysis_target_threshold: 0.3
+
+# experimental settings
+cases: ["ガ", "ヲ", "ニ", "ガ２", "デ", "ト", "カラ", "マデ"]
+bar_rels: ["ノ"]
+exophora_referents:
+  - 著者
+  - 読者
+  - 不特定:人
+  - 不特定:物
+tasks: ["pas", "bridging", "coreference"]
+special_tokens: ["[著者]", "[読者]", "[不特定:人]", "[不特定:物]", "[NULL]", "[NA]"]
+
+# hyper-parameters to be tuned
+effective_batch_size: 16
+max_epochs: 16
+lr: 0.00005
+warmup_steps: 1000
+warmup_ratio: null
+
+# environment-dependent settings
+devices: ${oc.env:DEVICES,0}
+max_batches_per_device: ${oc.env:MAX_BATCHES_PER_DEVICE,4}
+num_workers: ${oc.env:NUM_WORKERS,4}
+compile: ${oc.env:COMPILE,false}

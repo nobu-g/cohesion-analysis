@@ -8,11 +8,6 @@ from subprocess import PIPE, Popen
 from typing import Any, Optional
 
 from cohesion_tools.extractors import PasExtractor
-from rhoknp import KNP, Document, Jumanpp, Morpheme, Sentence
-from rhoknp.cohesion import RelTag
-from rhoknp.props import FeatureDict
-from rhoknp.utils.reader import chunk_by_document
-
 from constants import (
     BASE_PHRASE_FEATURES,
     CONJTYPE_TAG_CONJFORM_TAG2CONJFORM_ID,
@@ -22,6 +17,10 @@ from constants import (
     POS_TAG_SUBPOS_TAG2SUBPOS_ID,
     SUB_WORD_FEATURES,
 )
+from rhoknp import KNP, Document, Jumanpp, Morpheme, Sentence
+from rhoknp.cohesion import RelTag
+from rhoknp.props import FeatureDict
+from rhoknp.utils.reader import chunk_by_document
 
 logging.getLogger("rhoknp").setLevel(logging.ERROR)
 logger = logging.getLogger(__name__)

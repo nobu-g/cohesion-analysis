@@ -38,7 +38,9 @@ class InputFeatures:
     input_ids: list[int]
     attention_mask: list[bool]
     token_type_ids: list[int]
-    source_mask: list[bool]  # loss を計算する対象の基本句かどうか（文書分割によって文脈としてのみ使用される場合は False）
+    source_mask: list[
+        bool
+    ]  # loss を計算する対象の基本句かどうか（文書分割によって文脈としてのみ使用される場合は False）
     target_mask: list[list[list[bool]]]  # source と関係を持つ候補かどうか（後ろと共参照はしないなど）
     source_label: list[list[int]]  # 解析対象基本句かどうか
     target_label: list[list[list[float]]]  # source と関係を持つかどうか

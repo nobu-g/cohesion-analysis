@@ -1,3 +1,5 @@
+import functools
+import operator
 from typing import Optional
 
 from rhoknp import Document
@@ -32,7 +34,7 @@ def _arg_to_pas_type(arg: EndophoraArgument) -> Optional[str]:
 
 
 def gen_response(document: Document, task_to_rel_types: dict[Task, list[str]], prediction: DocumentProb) -> OutputData:
-    rel_types: list[str] = sum(task_to_rel_types.values(), [])
+    rel_types: list[str] = functools.reduce(operator.iconcat, task_to_rel_types.values(), [])
     phrases: list[Phrase] = []
     special_tokens = prediction.special_tokens
     special2index = {special: idx for idx, special in enumerate(special_tokens)}
@@ -64,9 +66,11 @@ def gen_response(document: Document, task_to_rel_types: dict[Task, list[str]], p
                         target=None,
                         exo_target=arg.exophora_referent.text,
                         is_relaxed=(arg not in args),
-                        confidence=rel_prob.special_probs[special2index[arg.exophora_referent.text]]
-                        if rel_prob is not None and arg.exophora_referent.text in special2index
-                        else None,
+                        confidence=(
+                            rel_prob.special_probs[special2index[arg.exophora_referent.text]]
+                            if rel_prob is not None and arg.exophora_referent.text in special2index
+                            else None
+                        ),
                         pas_type="exo",
                         within_sub_doc=True,
                     )
@@ -103,9 +107,11 @@ def gen_response(document: Document, task_to_rel_types: dict[Task, list[str]], p
                     target=None,
                     exo_target=exophora_referent.text,
                     is_relaxed=(exophora_referent not in exophora_referents),
-                    confidence=rel_prob.special_probs[special2index[exophora_referent.text]]
-                    if rel_prob is not None and exophora_referent.text in special2index
-                    else None,
+                    confidence=(
+                        rel_prob.special_probs[special2index[exophora_referent.text]]
+                        if rel_prob is not None and exophora_referent.text in special2index
+                        else None
+                    ),
                     pas_type=None,
                     within_sub_doc=True,
                 ),
@@ -116,7 +122,8 @@ def gen_response(document: Document, task_to_rel_types: dict[Task, list[str]], p
                 dtid=base_phrase.global_index,
                 surf=base_phrase.text,
                 core=get_core_expression(base_phrase),
-                targets=sum(
+                targets=functools.reduce(
+                    operator.iconcat,
                     [
                         rel_types * bool(base_phrase.features.get(task.value + "対象"))
                         for task, rel_types in task_to_rel_types.items()

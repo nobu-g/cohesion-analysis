@@ -1,5 +1,7 @@
 import copy
+import functools
 import logging
+import operator
 import tempfile
 from pathlib import Path
 
@@ -142,7 +144,7 @@ async def reltypes() -> list[str]:
         Task.BRIDGING_REFERENCE_RESOLUTION: list(dataset_cfg.bar_rels),
         Task.COREFERENCE_RESOLUTION: ["="],
     }
-    return sum(task_to_rel_types.values(), [])
+    return functools.reduce(operator.iconcat, task_to_rel_types.values(), [])
 
 
 @app.get("/models")

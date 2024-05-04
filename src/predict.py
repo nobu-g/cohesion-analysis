@@ -11,7 +11,7 @@ import torch
 import transformers.utils.logging as hf_logging
 from lightning.pytorch.trainer.states import TrainerFn
 from omegaconf import DictConfig, OmegaConf
-from rhoknp import KNP, Document
+from rhoknp import KNP, KWJA, Document
 from torch.utils.data import DataLoader
 
 from callbacks.prediction_writer import CohesionWriter
@@ -67,7 +67,11 @@ class Analyzer:
         raw_document = Document.from_raw_text(self.sanitize_string(raw_text))
         logger.info("input text: " + raw_document.text)
         knp = KNP(options=["-tab", "-disable-segmentation-modification", "-dpnd-fast"])
-        document = knp.apply_to_document(raw_document)
+        if knp.is_available():
+            document = knp.apply_to_document(raw_document)
+        else:
+            kwja = KWJA(options=["--tasks", "char,word"])
+            document = kwja.apply_to_document(raw_document)
         document.doc_id = "0"
         for idx, sentence in enumerate(document.sentences):
             sentence.sid = f"0-{idx + 1}"

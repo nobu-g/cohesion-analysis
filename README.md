@@ -56,34 +56,37 @@ For more information, please refer to [the original paper](#reference)
 - Download a pre-trained model.
 
 ```shell
-$ wget https://lotus.kuee.kyoto-u.ac.jp/~ueda/dist/cohesion_analysis_model.tar.gz  # trained checkpoint
+$ wget https://lotus.kuee.kyoto-u.ac.jp/~ueda/dist/cohesion_analysis_v2/model_base.bin  # trained checkpoint (base)
+$ wget https://lotus.kuee.kyoto-u.ac.jp/~ueda/dist/cohesion_analysis_v2/model_large.bin  # trained checkpoint (large)
 $ tar xvzf cohesion_analysis_model.tar.gz  # make sure that the extracted directory is located at the root directory of this project
-$ ls cohesion_analysis_model
-model_best.pth
+$ ls model_*.bin
+model_base.bin  model_large.bin
 ```
 
 - Predict the cohesion of a sentence.
 
 ```shell
-poetry run python src/predict.py checkpoint="cohesion_analysis_model/model_best.pth" input_file=<(echo "太郎はパンを買って食べた。") [num_workers=0] [devices=1]
+$ poetry run python src/predict.py checkpoint="model_large.bin" input_file=<(echo "太郎はパンを買って食べた。") [devices=1] > analyzed.knp; rhoknp show -r analyzed.knp
+# S-ID:0-1 KNP:5.0-25425d33 DATE:2024/01/01 SCORE:59.00000
+太郎は─────┐
+  パンを─┐ │
+    買って─┤  ガ:太郎 ヲ:パン
+    食べた。  ガ:太郎 ヲ:パン
+
 ```
 
 The output is in the KNP format, which looks like the following:
 
 ```
-# S-ID:202210010000-0-0 kwja:1.0.2
-* 2D
-+ 5D <rel type="=" target="ツール" sid="202210011918-0-0" id="5"/><体言><NE:ARTIFACT:KWJA>
-KWJA ＫWＪＡ KWJA 名詞 6 固有名詞 3 * 0 * 0 <基本句-主辞>
-は は は 助詞 9 副助詞 2 * 0 * 0 "代表表記:は/は" <代表表記:は/は>
-* 2D
-+ 2D <体言>
-日本 にほん 日本 名詞 6 地名 4 * 0 * 0 "代表表記:日本/にほん 地名:国" <代表表記:日本/にほん><地名:国><基本
-句-主辞>
-+ 4D <体言><係:ノ格>
-語 ご 語 名詞 6 普通名詞 1 * 0 * 0 "代表表記:語/ご 漢字読み:音 カテゴリ:抽象物" <代表表記:語/ご><漢字読み:
-音><カテゴリ:抽象物><基本句-主辞>
-の の の 助詞 9 接続助詞 3 * 0 * 0 "代表表記:の/の" <代表表記:の/の>
+# S-ID:0-1 KNP:5.0-25425d33 DATE:2024/05/05 SCORE:59.00000
+* 3D <文頭><人名><ハ><助詞><体言><係:未格><提題><区切:3-5><主題表現><格要素><連用要素><正規化代表表記:太郎/たろう><主辞代表表記:太郎/たろう>
++ 3D <文頭><人名><ハ><助詞><体言><係:未格><提題><区切:3-5><主題表現><格要素><連用要素><名詞項候補><先行詞候補><SM-人><SM-主体><正規化代表表記:太郎/たろう><主辞代表表記:太郎/たろう><bridging対象><coreference対象>
+太郎 たろう 太郎 名詞 6 人名 5 * 0 * 0 "代表表記:太郎/たろう 人名:日本:名:45:0.00106" <代表表記:太郎/たろう><人名:日本:名:45:0.00106><正規化代表表記:太郎/たろう><漢字><かな漢字><名詞相当語><文頭><自立><内容語><タグ単位始><文節始><固有キー><文節主辞>
+は は は 助詞 9 副助詞 2 * 0 * 0 "代表表記:は/は" <代表表記:は/は><正規化代表表記:は/は><かな漢字><ひらがな><付属>
+* 2D <BGH:パン/ぱん><ヲ><助詞><体言><係:ヲ格><区切:0-0><格要素><連用要素><正規化代表表記:パン/ぱん><主辞代表表記:パン/ぱん>
++ 2D <BGH:パン/ぱん><ヲ><助詞><体言><係:ヲ格><区切:0-0><格要素><連用要素><名詞項候補><先行詞候補><正規化代表表記:パン/ぱん><主辞代表表記:パン/ぱん><bridging対象><coreference対象>
+パン ぱん パン 名詞 6 普通名詞 1 * 0 * 0 "代表表記:パン/ぱん ドメイン:料理・食事 カテゴリ:人工物-食べ物" <代表表記:パン/ぱん><ドメイン:料理・食事><カテゴリ:人工物-食べ物><正規化代表表記:パン/ぱん><記英数カ><カタカナ><名詞相当語><自立><内容語><タグ単位始><文節始><固有キー><文節主辞>
+を を を 助詞 9 格助詞 1 * 0 * 0 "代表表記:を/を" <代表表記:を/を><正規化代表表記:を/を><かな漢字><ひらがな><付属>
 ...
 ```
 

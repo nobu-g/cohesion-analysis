@@ -1,6 +1,0 @@
-defaults:
-  - /datamodule/base/base.yaml@jcre3
-
-jcre3:
-  knp_path: ${dataset_path}/jcre3/train
-  training: true

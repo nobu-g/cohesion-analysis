@@ -29,7 +29,7 @@ fi
 WORK_DIR="$(mktemp -d)"
 readonly WORK_DIR
 
-mkdir -p "${WORK_DIR}" "${OUT_DIR}"/{kc,kwdlc,fuman,wac,jcre3}
+mkdir -p "${WORK_DIR}" "${OUT_DIR}"/{kc,kwdlc,fuman,wac}
 git clone --depth 1 git@github.com:ku-nlp/KyotoCorpusFull.git "${WORK_DIR}/KyotoCorpus"
 git clone --depth 1 git@github.com:ku-nlp/KWDLC.git "${WORK_DIR}/KWDLC"
 git clone --depth 1 git@github.com:ku-nlp/AnnotatedFKCCorpus.git "${WORK_DIR}/AnnotatedFKCCorpus"
@@ -49,8 +49,5 @@ poetry run python ./scripts/build_dataset.py "${WORK_DIR}/WikipediaAnnotatedCorp
   --id "${WORK_DIR}/WikipediaAnnotatedCorpus/id" \
   -j "${JOBS}" \
   --doc-id-format wac
-poetry run python ./scripts/build_dataset.py "${WORK_DIR}/multimodal-annotation-data/knp" "${OUT_DIR}/jcre3" \
-  --id "${WORK_DIR}/multimodal-annotation-data/id" \
-  -j "${JOBS}"
 
 rm -rf "${WORK_DIR}"

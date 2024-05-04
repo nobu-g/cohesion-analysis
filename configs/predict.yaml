@@ -4,10 +4,13 @@ defaults:
 
 # Path to checkpoint.
 checkpoint: /somewhere/model.ckpt
-# Sentences to analysis separated by "。". If not specified, use stdin.
-input: null
+
+# Sentences to analysis. If not specified, use stdin.
+# Path to file where documents to analyze exist (raw text format).
+input_file: null
 # Path to file or directory where documents to analyze exist. Note that the documents must be in KNP format.
-input_path: null
+input_knp: null
+
 # Directory where analyzed knp files are exported.
 export_dir: null
 # Threshold for analysis target prediction probability. If the probability is lower than this value, the base phrase is

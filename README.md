@@ -39,7 +39,64 @@ For more information, please refer to [the original paper](#reference)
 
 ## Quick Start
 
-TBW
+- Install Juman++/KNP or KWJA.
+
+  - [Juman++](https://github.com/ku-nlp/jumanpp)/[KNP](https://github.com/ku-nlp/knp)
+    ```shell
+      docker pull kunlp/jumanpp-knp:latest
+      echo 'docker run -i --rm --platform linux/amd64 kunlp/jumanpp-knp jumanpp' > /somewhere/in/your/path/jumanpp
+      echo 'docker run -i --rm --platform linux/amd64 kunlp/jumanpp-knp knp' > /somewhere/in/your/path/knp
+    ```
+
+  - [KWJA](https://github.com/ku-nlp/kwja)
+    ```shell
+      pipx install kwja
+    ```
+
+- Download a pre-trained model.
+
+```shell
+$ wget https://lotus.kuee.kyoto-u.ac.jp/~ueda/dist/cohesion_analysis_model.tar.gz  # trained checkpoint
+$ tar xvzf cohesion_analysis_model.tar.gz  # make sure that the extracted directory is located at the root directory of this project
+$ ls cohesion_analysis_model
+model_best.pth
+```
+
+- Predict the cohesion of a sentence.
+
+```shell
+poetry run python src/predict.py checkpoint="cohesion_analysis_model/model_best.pth" input_file=<(echo "太郎はパンを買って食べた。") [num_workers=0] [devices=1]
+```
+
+The output is in the KNP format, which looks like the following:
+
+```
+# S-ID:202210010000-0-0 kwja:1.0.2
+* 2D
++ 5D <rel type="=" target="ツール" sid="202210011918-0-0" id="5"/><体言><NE:ARTIFACT:KWJA>
+KWJA ＫWＪＡ KWJA 名詞 6 固有名詞 3 * 0 * 0 <基本句-主辞>
+は は は 助詞 9 副助詞 2 * 0 * 0 "代表表記:は/は" <代表表記:は/は>
+* 2D
++ 2D <体言>
+日本 にほん 日本 名詞 6 地名 4 * 0 * 0 "代表表記:日本/にほん 地名:国" <代表表記:日本/にほん><地名:国><基本
+句-主辞>
++ 4D <体言><係:ノ格>
+語 ご 語 名詞 6 普通名詞 1 * 0 * 0 "代表表記:語/ご 漢字読み:音 カテゴリ:抽象物" <代表表記:語/ご><漢字読み:
+音><カテゴリ:抽象物><基本句-主辞>
+の の の 助詞 9 接続助詞 3 * 0 * 0 "代表表記:の/の" <代表表記:の/の>
+...
+```
+
+You can read a KNP format file with [rhoknp](https://github.com/ku-nlp/rhoknp).
+
+```python
+from rhoknp import Document
+with open("analyzed.knp") as f:
+    parsed_document = Document.from_knp(f.read())
+```
+
+For more details about KNP format, see [rhoknp documentation](https://rhoknp.readthedocs.io/en/latest/format/index.html#knp).
+
 
 ## Building a dataset
 

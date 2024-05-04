@@ -117,10 +117,10 @@ def main(cfg: DictConfig):
     analyzer = Analyzer(cfg)
 
     source: Union[Path, str]
-    if cfg.input is not None:
-        source = cfg.input
-    elif cfg.input_path is not None:
-        source = Path(cfg.input_path)
+    if cfg.input_file is not None:
+        source = Path(cfg.input_file).read_text()
+    elif cfg.input_knp is not None:
+        source = Path(cfg.input_knp)
     else:
         source = "".join(sys.stdin.readlines())
 

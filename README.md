@@ -115,7 +115,7 @@ echo 'DATA_DIR="data/dataset"' >> .env
 ## Training
 
 ```shell
-poetry run python src/train.py -cn default devices=[0,1] max_batches_per_device=4
+poetry run python src/train.py -cn default datamodule=all_wo_kc devices=[0,1] max_batches_per_device=4
 ```
 
 Here are commonly used options:

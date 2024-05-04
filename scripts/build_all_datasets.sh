@@ -30,14 +30,13 @@ WORK_DIR="$(mktemp -d)"
 readonly WORK_DIR
 
 mkdir -p "${WORK_DIR}" "${OUT_DIR}"/{kc,kwdlc,fuman,wac}
-git clone --depth 1 git@github.com:ku-nlp/KyotoCorpusFull.git "${WORK_DIR}/KyotoCorpus"
+#git clone --depth 1 git@github.com:ku-nlp/KyotoCorpus.git "${WORK_DIR}/KyotoCorpus"
 git clone --depth 1 git@github.com:ku-nlp/KWDLC.git "${WORK_DIR}/KWDLC"
 git clone --depth 1 git@github.com:ku-nlp/AnnotatedFKCCorpus.git "${WORK_DIR}/AnnotatedFKCCorpus"
 git clone --depth 1 git@github.com:ku-nlp/WikipediaAnnotatedCorpus.git "${WORK_DIR}/WikipediaAnnotatedCorpus"
-git clone --depth 1 git@github.com:nobu-g/multimodal-annotation-data.git "${WORK_DIR}/multimodal-annotation-data"
-poetry run python ./scripts/build_dataset.py "${WORK_DIR}"/KyotoCorpus/knp "${OUT_DIR}/kc" \
-  --id "${WORK_DIR}/KyotoCorpus/id/full" \
-  -j "${JOBS}"
+#poetry run python ./scripts/build_dataset.py "${WORK_DIR}"/KyotoCorpus/knp "${OUT_DIR}/kc" \
+#  --id "${WORK_DIR}/KyotoCorpus/id/full" \
+#  -j "${JOBS}"
 poetry run python ./scripts/build_dataset.py "${WORK_DIR}/KWDLC/knp" "${OUT_DIR}/kwdlc" \
   --id "${WORK_DIR}/KWDLC/id/split_for_pas" \
   -j "${JOBS}" \

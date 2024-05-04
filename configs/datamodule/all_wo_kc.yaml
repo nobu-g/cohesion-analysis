@@ -1,0 +1,18 @@
+defaults:
+  - train:
+      - kwdlc.yaml
+      - fuman.yaml
+      - wac.yaml
+  - valid:
+      - kwdlc.yaml
+      - fuman.yaml
+      - wac.yaml
+  - test:
+      - kwdlc.yaml
+      - fuman.yaml
+      - wac.yaml
+  - predict:
+      - custom.yaml
+
+batch_size: ${max_batches_per_device}
+num_workers: ${num_workers}

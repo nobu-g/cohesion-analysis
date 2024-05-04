@@ -9,6 +9,7 @@ import jaconv
 import lightning.pytorch as pl
 import torch
 import transformers.utils.logging as hf_logging
+from lightning.pytorch.callbacks import Callback
 from lightning.pytorch.trainer.states import TrainerFn
 from omegaconf import DictConfig, OmegaConf
 from rhoknp import KNP, KWJA, Document
@@ -20,8 +21,11 @@ from modules import CohesionModule
 from utils.util import current_datetime_string
 
 hf_logging.set_verbosity(hf_logging.ERROR)
+logging.getLogger("torch").setLevel(logging.ERROR)
+logging.getLogger("lightning").setLevel(logging.ERROR)
 
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.ERROR)
 
 OmegaConf.register_new_resolver("now", current_datetime_string, replace=True, use_cache=True)
 OmegaConf.register_new_resolver("len", len, replace=True, use_cache=True)
@@ -38,13 +42,15 @@ class Analyzer:
         cfg_train: DictConfig = self.model.hparams
         OmegaConf.set_struct(cfg_train, False)  # enable to add new key-value pairs
         self.cfg = OmegaConf.merge(cfg_train, cfg)
+        assert isinstance(self.cfg, DictConfig)
 
+        callbacks: list[Callback] = list(map(hydra.utils.instantiate, self.cfg.get("callbacks", {}).values()))
         self.prediction_writer = CohesionWriter(analysis_target_threshold=self.cfg.analysis_target_threshold)
 
         # Instantiate lightning trainer
         self.trainer: pl.Trainer = hydra.utils.instantiate(
             self.cfg.trainer,
-            callbacks=[self.prediction_writer],
+            callbacks=[*callbacks, self.prediction_writer],
             logger=False,
             devices=self.cfg.devices,
         )

@@ -17,6 +17,12 @@ The process is as follows.
 
 For more information, please refer to [the original paper](#reference)
 
+## Demo
+
+<https://lotus.kuee.kyoto-u.ac.jp/cohesion-analysis/pub/>
+
+<img width="1273" alt="demo-view" src="https://user-images.githubusercontent.com/25974220/207257969-383c2db4-e28e-447f-af58-12f3cd33ffda.png">
+
 ## Requirements
 
 - Python 3.9+

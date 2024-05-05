@@ -21,8 +21,9 @@ For more information, please refer to [the original paper](#reference)
 
 - Python 3.9+
 - Dependencies: See [pyproject.toml](./pyproject.toml).
-- [Juman++](https://github.com/ku-nlp/jumanpp) 2.0.0-rc4
-- [KNP](https://github.com/ku-nlp/knp) 5.0
+- [Juman++](https://github.com/ku-nlp/jumanpp) 2.0.0-rc4 (optional)
+- [KNP](https://github.com/ku-nlp/knp) 5.0 (optional)
+- [KWJA](https://github.com/ku-nlp/kwja) 2.3.0 (optional)
 
 ## Getting started
 
@@ -53,20 +54,19 @@ For more information, please refer to [the original paper](#reference)
       pipx install kwja
     ```
 
-- Download a pre-trained model.
+- Download pre-trained models.
 
 ```shell
 $ wget https://lotus.kuee.kyoto-u.ac.jp/~ueda/dist/cohesion_analysis_v2/model_base.bin  # trained checkpoint (base)
 $ wget https://lotus.kuee.kyoto-u.ac.jp/~ueda/dist/cohesion_analysis_v2/model_large.bin  # trained checkpoint (large)
-$ tar xvzf cohesion_analysis_model.tar.gz  # make sure that the extracted directory is located at the root directory of this project
 $ ls model_*.bin
 model_base.bin  model_large.bin
 ```
 
-- Predict the cohesion of a sentence.
+- Run prediction.
 
 ```shell
-$ poetry run python src/predict.py checkpoint="model_large.bin" input_file=<(echo "太郎はパンを買って食べた。") [devices=1] > analyzed.knp; rhoknp show -r analyzed.knp
+$ poetry run python src/predict.py checkpoint=model_large.bin input_file=<(echo "太郎はパンを買って食べた。") [devices=1] > analyzed.knp; rhoknp show -r analyzed.knp
 # S-ID:0-1 KNP:5.0-25425d33 DATE:2024/01/01 SCORE:59.00000
 太郎は─────┐
   パンを─┐ │
@@ -75,7 +75,7 @@ $ poetry run python src/predict.py checkpoint="model_large.bin" input_file=<(ech
 
 ```
 
-The output is in the KNP format, which looks like the following:
+The output of `predict.py` is in the KNP format, which looks like the following:
 
 ```
 # S-ID:0-1 KNP:5.0-25425d33 DATE:2024/05/05 SCORE:59.00000
@@ -99,7 +99,6 @@ with open("analyzed.knp") as f:
 ```
 
 For more details about KNP format, see [rhoknp documentation](https://rhoknp.readthedocs.io/en/latest/format/index.html#knp).
-
 
 ## Building a dataset
 
@@ -149,14 +148,12 @@ poetry run python src/train.py -cn debug
 If you are on a machine with MPS devices (e.g. Apple M1), specify `trainer=cpu.debug` to use CPU.
 
 ```shell
-# For debugging word segmenter
 poetry run python scripts/train.py -cn debug trainer=cpu.debug
 ```
 
 If you are on a machine with GPUs, you can specify the GPUs to use with the `devices` option.
 
 ```shell
-# For debugging word segmenter
 poetry run python scripts/train.py -cn debug devices=[0]
 ```
 

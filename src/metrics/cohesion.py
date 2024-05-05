@@ -6,7 +6,6 @@ import numpy as np
 import torch
 from cohesion_tools.evaluators.cohesion import CohesionEvaluator, CohesionScore
 from cohesion_tools.evaluators.utils import F1Metric
-from cohesion_tools.extractors import PasExtractor
 from cohesion_tools.task import Task
 from rhoknp import Document, Sentence
 from torchmetrics import Metric
@@ -29,6 +28,7 @@ class CohesionMetric(Metric):
         super().__init__()
         self.analysis_target_threshold: float = analysis_target_threshold
         self.dataset: Optional[CohesionDataset] = None
+        self.flip_writer_reader_according_to_type_id: bool = False
         # Metric state variables can either be torch.Tensor or an empty list which can be used to store torch.Tensors`.
         # i.e. Expected metric state to be either a Tensor or a list of Tensor
         for state_name in self.STATE_NAMES:
@@ -80,7 +80,7 @@ class CohesionMetric(Metric):
         orig_did_to_sentences: dict[str, list[Sentence]] = defaultdict(list)
         orig_did_to_gold_sentences: dict[str, list[Sentence]] = defaultdict(list)
         assert self.dataset is not None, "dataset is not set"
-        knp_writer = PredictionKNPWriter(self.dataset)
+        knp_writer = PredictionKNPWriter(self.dataset, self.flip_writer_reader_according_to_type_id)
         assert len(self.example_ids) == len(self.relation_logits) == len(self.source_mask_logits)
         for example_id, relation_logits, source_mask_logits in zip(
             self.example_ids, self.relation_logits, self.source_mask_logits
@@ -102,7 +102,10 @@ class CohesionMetric(Metric):
             predicted_document = gold_document.reparse()
             predicted_document.doc_id = gold_example.doc_id
             knp_writer.add_rel_tags(
-                predicted_document, phrase_selection_prediction.tolist(), is_analysis_target.tolist()
+                predicted_document,
+                phrase_selection_prediction.tolist(),
+                gold_example.sid_to_type_id,
+                is_analysis_target.tolist(),
             )
             orig_doc_id = to_orig_doc_id(gold_example.doc_id)
             for sentence in extract_target_sentences(predicted_document):
@@ -156,14 +159,13 @@ class CohesionMetric(Metric):
         gold_documents: list[Document],
     ):
         metrics: dict[str, float] = {}
-        pas_extractor = dataset.task_to_extractor[Task.PAS_ANALYSIS]
-        assert isinstance(pas_extractor, PasExtractor)
         evaluator = CohesionEvaluator(
             tasks=dataset.tasks,
             exophora_referent_types=[e.type for e in dataset.exophora_referents],
             pas_cases=dataset.cases,
             bridging_rel_types=dataset.bar_rels,
         )
+        evaluator.coreference_evaluator.is_target_mention = lambda mention: mention.features.get("体言") is True
         score: CohesionScore = evaluator.run(gold_documents=gold_documents, predicted_documents=predicted_documents)
 
         for task_str, analysis_type_to_metric in score.to_dict().items():
@@ -171,6 +173,7 @@ class CohesionMetric(Metric):
                 key = task_str
                 if analysis_type != "all":
                     key += f"_{analysis_type}"
+                metrics[key + "_tp_fn"] = metric.tp_fn
                 metrics[key + "_f1"] = metric.f1
         metrics["cohesion_analysis_f1"] = mean(
             metrics[key] for key in ("pas_f1", "bridging_f1", "coreference_f1") if key in metrics

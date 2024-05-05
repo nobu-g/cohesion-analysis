@@ -1,18 +1,9 @@
 defaults:
   - train:
-      - kwdlc.yaml
-      - fuman.yaml
-      - wac.yaml
       - jcre3.yaml
   - valid:
-      - kwdlc.yaml
-      - fuman.yaml
-      - wac.yaml
       - jcre3.yaml
   - test:
-      - kwdlc.yaml
-      - fuman.yaml
-      - wac.yaml
       - jcre3.yaml
   - predict:
       - custom.yaml

@@ -29,11 +29,12 @@ fi
 WORK_DIR="$(mktemp -d)"
 readonly WORK_DIR
 
-mkdir -p "${WORK_DIR}" "${OUT_DIR}"/{kc,kwdlc,fuman,wac}
+mkdir -p "${WORK_DIR}" "${OUT_DIR}"/{kwdlc,fuman,wac,jcre3}
 #git clone --depth 1 git@github.com:ku-nlp/KyotoCorpus.git "${WORK_DIR}/KyotoCorpus"
 git clone --depth 1 git@github.com:ku-nlp/KWDLC.git "${WORK_DIR}/KWDLC"
 git clone --depth 1 git@github.com:ku-nlp/AnnotatedFKCCorpus.git "${WORK_DIR}/AnnotatedFKCCorpus"
 git clone --depth 1 git@github.com:ku-nlp/WikipediaAnnotatedCorpus.git "${WORK_DIR}/WikipediaAnnotatedCorpus"
+git clone --depth 1 git@github.com:riken-grp/J-CRe3.git "${WORK_DIR}/J-CRe3"
 #poetry run python ./scripts/build_dataset.py "${WORK_DIR}"/KyotoCorpus/knp "${OUT_DIR}/kc" \
 #  --id "${WORK_DIR}/KyotoCorpus/id/full" \
 #  -j "${JOBS}"
@@ -48,5 +49,8 @@ poetry run python ./scripts/build_dataset.py "${WORK_DIR}/WikipediaAnnotatedCorp
   --id "${WORK_DIR}/WikipediaAnnotatedCorpus/id" \
   -j "${JOBS}" \
   --doc-id-format wac
+poetry run python ./scripts/build_dataset.py "${WORK_DIR}/J-CRe3/textual_annotations" "${OUT_DIR}/jcre3" \
+  --id "${WORK_DIR}/J-CRe3/id" \
+  -j "${JOBS}"
 
 rm -rf "${WORK_DIR}"

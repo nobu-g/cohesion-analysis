@@ -1,4 +1,5 @@
 from collections.abc import Collection
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Union
 
@@ -12,6 +13,31 @@ IGNORE_INDEX = -100
 
 class CamelCaseDataClassJsonMixin(DataClassJsonMixin):
     dataclass_json_config = config(letter_case=LetterCase.CAMEL)["dataclasses_json"]  # type: ignore
+
+
+@dataclass
+class ImageInfo(CamelCaseDataClassJsonMixin):
+    id: str
+    path: str
+    time: int
+
+
+@dataclass
+class UtteranceInfo(CamelCaseDataClassJsonMixin):
+    text: str
+    sids: list[str]
+    start: int
+    end: int
+    duration: int
+    speaker: str
+    image_ids: list[str]
+
+
+@dataclass
+class DatasetInfo(CamelCaseDataClassJsonMixin):
+    scenario_id: str
+    utterances: list[UtteranceInfo]
+    images: list[ImageInfo]
 
 
 def current_datetime_string(fmt: str) -> str:

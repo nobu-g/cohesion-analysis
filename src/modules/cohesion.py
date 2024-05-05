@@ -124,7 +124,10 @@ class CohesionModule(pl.LightningModule):
         for corpus in self.valid_corpora:
             metric = self.val_metrics[corpus]
             assert isinstance(self.trainer.val_dataloaders, dict)
-            metric.set_attributes(dataset=self.trainer.val_dataloaders[corpus].dataset)
+            metric.set_attributes(
+                dataset=self.trainer.val_dataloaders[corpus].dataset,
+                flip_writer_reader_according_to_type_id=self.hparams["flip_reader_writer"],
+            )
             metrics = metric.compute()
             metrics_log[corpus] = metrics
             metric.reset()
@@ -167,7 +170,10 @@ class CohesionModule(pl.LightningModule):
         for corpus in self.test_corpora:
             metric = self.test_metrics[corpus]
             assert isinstance(self.trainer.test_dataloaders, dict)
-            metric.set_attributes(dataset=self.trainer.test_dataloaders[corpus].dataset)
+            metric.set_attributes(
+                dataset=self.trainer.test_dataloaders[corpus].dataset,
+                flip_writer_reader_according_to_type_id=self.hparams["flip_reader_writer"],
+            )
             metrics = metric.compute()
             metrics_log[corpus] = metrics
             metric.reset()

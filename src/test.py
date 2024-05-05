@@ -11,15 +11,13 @@ import lightning.pytorch as pl
 import torch
 import transformers.utils.logging as hf_logging
 from cohesion_tools.evaluators.cohesion import CohesionEvaluator, CohesionScore
-from cohesion_tools.extractors import PasExtractor
-from cohesion_tools.task import Task
 from lightning.pytorch.trainer.states import TrainerFn
 from lightning.pytorch.utilities.rank_zero import rank_zero_only
 from lightning.pytorch.utilities.warnings import PossibleUserWarning
 from omegaconf import DictConfig, ListConfig, OmegaConf
 from rhoknp import Document
 
-from callbacks.prediction_writer import CohesionWriter
+from callbacks import CohesionWriter
 from datamodule.datamodule import CohesionDataModule
 from datamodule.dataset.cohesion import CohesionDataset
 from modules import CohesionModule
@@ -58,7 +56,10 @@ def main(eval_cfg: DictConfig):
     cfg = OmegaConf.merge(train_cfg, eval_cfg)
     assert isinstance(cfg, DictConfig)
 
-    prediction_writer = CohesionWriter(analysis_target_threshold=cfg.analysis_target_threshold)
+    prediction_writer = CohesionWriter(
+        flip_writer_reader_according_to_type_id=cfg.flip_reader_writer,
+        analysis_target_threshold=cfg.analysis_target_threshold,
+    )
 
     num_devices: int = len(cfg.devices) if isinstance(cfg.devices, (list, ListConfig)) else cfg.devices
     cfg.effective_batch_size = cfg.max_batches_per_device * num_devices
@@ -124,14 +125,13 @@ def save_prediction(datasets: dict[str, CohesionDataset], pred_dir: Path) -> Non
         predicted_documents: list[Document] = []
         for path in pred_dir.joinpath(f"knp_{corpus}").glob("*.knp"):
             predicted_documents.append(Document.from_knp(path.read_text()))
-        pas_extractor = dataset.task_to_extractor[Task.PAS_ANALYSIS]
-        assert isinstance(pas_extractor, PasExtractor)
         evaluator = CohesionEvaluator(
             tasks=dataset.tasks,
             exophora_referent_types=[e.type for e in dataset.exophora_referents],
             pas_cases=dataset.cases,
             bridging_rel_types=dataset.bar_rels,
         )
+        evaluator.coreference_evaluator.is_target_mention = lambda mention: mention.features.get("体言") is True
         score_result: CohesionScore = evaluator.run(
             gold_documents=dataset.orig_documents,
             predicted_documents=predicted_documents,

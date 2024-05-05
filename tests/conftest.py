@@ -134,6 +134,7 @@ def fixture_train_dataset(
         special_tokens=ListConfig(special_tokens),
         exophora_referents=ListConfig(exophora_referents),
         training=True,
+        flip_reader_writer=False,
         tokenizer=tokenizer,
     )
     return dataset
@@ -157,6 +158,7 @@ def fixture_eval_dataset(
         special_tokens=ListConfig(special_tokens),
         exophora_referents=ListConfig(exophora_referents),
         training=False,
+        flip_reader_writer=False,
         tokenizer=tokenizer,
     )
     return dataset

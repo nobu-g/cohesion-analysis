@@ -15,7 +15,7 @@ from omegaconf import DictConfig, OmegaConf
 from rhoknp import KNP, KWJA, Document
 from torch.utils.data import DataLoader
 
-from callbacks.prediction_writer import CohesionWriter
+from callbacks import CohesionWriter
 from datamodule.datamodule import CohesionDataModule
 from modules import CohesionModule
 from utils.util import current_datetime_string
@@ -45,7 +45,10 @@ class Analyzer:
         assert isinstance(self.cfg, DictConfig)
 
         callbacks: list[Callback] = list(map(hydra.utils.instantiate, self.cfg.get("callbacks", {}).values()))
-        self.prediction_writer = CohesionWriter(analysis_target_threshold=self.cfg.analysis_target_threshold)
+        self.prediction_writer = CohesionWriter(
+            flip_writer_reader_according_to_type_id=self.cfg.flip_reader_writer,
+            analysis_target_threshold=self.cfg.analysis_target_threshold,
+        )
 
         # Instantiate lightning trainer
         self.trainer: pl.Trainer = hydra.utils.instantiate(

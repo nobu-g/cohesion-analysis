@@ -25,6 +25,7 @@ class CohesionWriter(BasePredictionWriter):
         self,
         knp_destination: Union[Path, TextIO, None] = None,
         json_destination: Union[Path, TextIO, None] = None,
+        flip_writer_reader_according_to_type_id: bool = False,
         analysis_target_threshold: float = 0.5,
     ) -> None:
         super().__init__(write_interval="epoch")
@@ -37,6 +38,7 @@ class CohesionWriter(BasePredictionWriter):
             assert isinstance(dest, (Path, TextIO)), f"destination must be either Path or TextIO, but got {type(dest)}"
             if isinstance(dest, Path):
                 dest.mkdir(parents=True, exist_ok=True)
+        self.flip_writer_reader_according_to_type_id: bool = flip_writer_reader_according_to_type_id
         self.analysis_target_threshold: float = analysis_target_threshold
 
     def write_on_batch_end(
@@ -61,8 +63,8 @@ class CohesionWriter(BasePredictionWriter):
     ) -> None:
         dataset: Dataset = trainer.predict_dataloaders.dataset  # type: ignore
         assert isinstance(dataset, CohesionDataset)
+        knp_writer = PredictionKNPWriter(dataset, self.flip_writer_reader_according_to_type_id)
         orig_did_to_sentences: dict[str, list[Sentence]] = defaultdict(list)
-        knp_writer = PredictionKNPWriter(dataset)
         json_writer = ProbabilityJsonWriter(dataset)
         eid_to_relation_prediction: dict[int, list[list[list[float]]]] = {}
         for pred in predictions:
@@ -90,7 +92,10 @@ class CohesionWriter(BasePredictionWriter):
                 predicted_document = document.reparse()
                 predicted_document.doc_id = example.doc_id
                 knp_writer.add_rel_tags(
-                    predicted_document, phrase_selection_prediction.tolist(), is_analysis_target.tolist()
+                    predicted_document,
+                    phrase_selection_prediction.tolist(),
+                    example.sid_to_type_id,
+                    is_analysis_target.tolist(),
                 )
                 eid_to_relation_prediction[example_id.item()] = relation_prediction.tolist()
                 orig_doc_id = to_orig_doc_id(example.doc_id)

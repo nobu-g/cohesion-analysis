@@ -10,8 +10,10 @@ defaults:
   - _self_
 
 dataset_path: ${oc.env:DATA_DIR}
-max_seq_length: 64
+max_seq_length: 128
 model_name_or_path: "ku-nlp/deberta-v2-tiny-japanese"
+frw: false
+flip_reader_writer: ${frw}
 checkpoint: ""  # path to trained checkpoint
 document_split_stride: 2
 analysis_target_threshold: 0.3

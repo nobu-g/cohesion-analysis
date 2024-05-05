@@ -6,6 +6,7 @@ exophora_referents: ${exophora_referents}
 special_tokens: ${special_tokens}
 max_seq_length: ${max_seq_length}
 document_split_stride: ${document_split_stride}
+flip_reader_writer: ${flip_reader_writer}
 tokenizer:
   _target_: transformers.AutoTokenizer.from_pretrained
   pretrained_model_name_or_path: ${model_name_or_path}

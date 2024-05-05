@@ -108,13 +108,23 @@ For more details about KNP format, see [rhoknp documentation](https://rhoknp.rea
 
 ## Building a dataset
 
+- Set up the [J-CRe3](https://github.com/riken-grp/J-CRe3) dataset.
+
+- Create a `.env` file and set `JCRE3_DATASET_DIR`.
+
+```shell
+echo 'JCRE3_DATASET_DIR="/path/to/J-CRe3/recording"' >> .env
+```
+
+- Preprocess datasets.
+
 ```shell
 $ OUT_DIR=data/dataset [JOBS=4] ./scripts/build_dataset.sh
 $ ls data/dataset
 fuman/  kwdlc/  wac/
 ```
 
-## Creating a `.env` file and set `DATA_DIR`.
+- Set `DATA_DIR`.
 
 ```shell
 echo 'DATA_DIR="data/dataset"' >> .env

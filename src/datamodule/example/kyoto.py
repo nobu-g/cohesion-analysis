@@ -33,6 +33,7 @@ class KyotoExample:
         self.example_id: int = -1
         self.doc_id: str = ""
         self.phrases: dict[Task, list[CohesionBasePhrase]] = {}
+        self.sid_to_type_id: dict[str, int] = {}
         self.analysis_target_morpheme_indices: list[int] = []
         self.encoding: Optional[Encoding] = None
 
@@ -42,52 +43,69 @@ class KyotoExample:
         tasks: list[Task],
         task_to_extractor: dict[Task, BaseExtractor],
         task_to_rels: dict[Task, list[str]],
+        sid_to_type_id: dict[str, int],
+        flip_writer_reader_according_to_type_id: bool,
     ):
         self.doc_id = document.doc_id
+        self.sid_to_type_id = sid_to_type_id
         for task in tasks:
             extractor: BaseExtractor = task_to_extractor[task]
-            self.phrases[task] = wrap_base_phrases(document.base_phrases, extractor, task_to_rels[task])
+            self.phrases[task] = self._wrap_base_phrases(
+                document.base_phrases,
+                extractor,
+                task_to_rels[task],
+                flip_writer_reader_according_to_type_id,
+            )
 
         analysis_target_morpheme_indices = []
         for sentence in extract_target_sentences(document):
             analysis_target_morpheme_indices += [m.global_index for m in sentence.morphemes]
         self.analysis_target_morpheme_indices = analysis_target_morpheme_indices
 
-
-def wrap_base_phrases(
-    base_phrases: list[BasePhrase],
-    extractor: BaseExtractor,
-    rel_types: list[str],
-) -> list[CohesionBasePhrase]:
-    cohesion_base_phrases = [
-        CohesionBasePhrase(
-            base_phrase.head.global_index,
-            [morpheme.global_index for morpheme in base_phrase.morphemes],
-            [morpheme.text for morpheme in base_phrase.morphemes],
-            is_target=extractor.is_target(base_phrase),
-            referent_candidates=[],
-        )
-        for base_phrase in base_phrases
-    ]
-    for base_phrase, cohesion_base_phrase in zip(base_phrases, cohesion_base_phrases):
-        if cohesion_base_phrase.is_target:
-            all_rels = extractor.extract_rels(base_phrase)
-            rel_type_to_tags: dict[str, list[str]]
-            if isinstance(extractor, (PasExtractor, BridgingExtractor)):
-                assert isinstance(all_rels, dict)
-                rel_type_to_tags = {rel_type: _get_argument_tags(all_rels[rel_type]) for rel_type in rel_types}
-            elif isinstance(extractor, CoreferenceExtractor):
-                assert rel_types == ["="]
-                assert isinstance(all_rels, list)
-                rel_type_to_tags = {"=": _get_referent_tags(all_rels)}
-            else:
-                raise AssertionError
-            cohesion_base_phrase.rel2tags = rel_type_to_tags
-        referent_candidates = extractor.get_candidates(base_phrase, base_phrase.document.base_phrases)
-        cohesion_base_phrase.referent_candidates = [
-            cohesion_base_phrases[cand.global_index] for cand in referent_candidates
+    def _wrap_base_phrases(
+        self,
+        base_phrases: list[BasePhrase],
+        extractor: BaseExtractor,
+        rel_types: list[str],
+        flip_writer_reader_according_to_type_id: bool,
+    ) -> list[CohesionBasePhrase]:
+        cohesion_base_phrases = [
+            CohesionBasePhrase(
+                base_phrase.head.global_index,
+                [morpheme.global_index for morpheme in base_phrase.morphemes],
+                [morpheme.text for morpheme in base_phrase.morphemes],
+                is_target=extractor.is_target(base_phrase),
+                referent_candidates=[],
+            )
+            for base_phrase in base_phrases
         ]
-    return cohesion_base_phrases
+        for base_phrase, cohesion_base_phrase in zip(base_phrases, cohesion_base_phrases):
+            if cohesion_base_phrase.is_target:
+                all_rels = extractor.extract_rels(base_phrase)
+                rel_type_to_tags: dict[str, list[str]]
+                if isinstance(extractor, (PasExtractor, BridgingExtractor)):
+                    assert isinstance(all_rels, dict)
+                    rel_type_to_tags = {rel_type: _get_argument_tags(all_rels[rel_type]) for rel_type in rel_types}
+                elif isinstance(extractor, CoreferenceExtractor):
+                    assert rel_types == ["="]
+                    assert isinstance(all_rels, list)
+                    rel_type_to_tags = {"=": _get_referent_tags(all_rels)}
+                else:
+                    raise AssertionError
+                if (
+                    flip_writer_reader_according_to_type_id is True
+                    and self.sid_to_type_id.get(base_phrase.sentence.sid) == 1
+                ):
+                    flip_map = {"[著者]": "[読者]", "[読者]": "[著者]"}
+                    rel_type_to_tags = {
+                        rel_type: [flip_map.get(s, s) for s in tags] for rel_type, tags in rel_type_to_tags.items()
+                    }
+                cohesion_base_phrase.rel2tags = rel_type_to_tags
+            referent_candidates = extractor.get_candidates(base_phrase, base_phrase.document.base_phrases)
+            cohesion_base_phrase.referent_candidates = [
+                cohesion_base_phrases[cand.global_index] for cand in referent_candidates
+            ]
+        return cohesion_base_phrases
 
 
 def _get_argument_tags(arguments: list[Argument]) -> list[str]:

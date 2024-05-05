@@ -22,7 +22,8 @@ from transformers.file_utils import PaddingStrategy
 from datamodule.dataset.base import BaseDataset
 from datamodule.example import KyotoExample
 from datamodule.example.kyoto import CohesionBasePhrase
-from utils.util import IGNORE_INDEX, sigmoid, softmax
+from utils.sub_document import to_orig_doc_id
+from utils.util import IGNORE_INDEX, DatasetInfo, sigmoid, softmax
 
 logger = logging.getLogger(__name__)
 
@@ -59,6 +60,7 @@ class CohesionDataset(BaseDataset):
         exophora_referents: ListConfig,
         special_tokens: ListConfig,
         training: bool,
+        flip_reader_writer: bool,
     ) -> None:
         self.knp_path = Path(knp_path)
         self.exophora_referents = [ExophoraReferent(s) for s in exophora_referents]
@@ -76,6 +78,8 @@ class CohesionDataset(BaseDataset):
         self.special_to_index: dict[str, int] = {
             token: max_seq_length - len(self.special_tokens) + i for i, token in enumerate(self.special_tokens)
         }
+        self.flip_reader_writer: bool = flip_reader_writer
+        self.is_jcre3_dataset = self.knp_path.parts[-2] == "jcre3"
         exophora_referent_types: list[ExophoraReferentType] = [er.type for er in self.exophora_referents]
         self.task_to_extractor: dict[Task, BaseExtractor] = {
             Task.PAS_ANALYSIS: PasExtractor(
@@ -124,7 +128,13 @@ class CohesionDataset(BaseDataset):
         )
         for document in tqdm(documents, desc="Loading examples"):
             # give enough options to identify examples
-            hash_ = self._hash(documents_path, self.tasks, self.task_to_rels, self.task_to_extractor)
+            hash_ = self._hash(
+                documents_path,
+                self.tasks,
+                self.task_to_rels,
+                self.task_to_extractor,
+                self.flip_reader_writer,
+            )
             example_cache_path = cohesion_cache_dir / hash_ / f"{document.doc_id}.pkl"
             if example_cache_path.exists() and load_cache:
                 with example_cache_path.open(mode="rb") as f:
@@ -177,12 +187,23 @@ class CohesionDataset(BaseDataset):
         return filtered
 
     def _load_example_from_document(self, document: Document) -> KyotoExample:
+        orig_doc_id = to_orig_doc_id(document.doc_id)
+        sid_to_type_id: dict[str, int] = {}
+        if self.is_jcre3_dataset:
+            jcre3_dataset_dir = Path(os.environ["JCRE3_DATASET_DIR"])
+            dataset_info = DatasetInfo.from_json((jcre3_dataset_dir / orig_doc_id / "info.json").read_text())
+            for utterance in dataset_info.utterances:
+                assert utterance.speaker in ("主人", "ロボット")
+                # 主人（著者） -> type_id=0, ロボット（読者） -> type_id=1
+                sid_to_type_id.update({sid: int(utterance.speaker == "ロボット") for sid in utterance.sids})
         example = KyotoExample()
         example.load(
             document,
             tasks=self.tasks,
             task_to_extractor=self.task_to_extractor,
             task_to_rels=self.task_to_rels,
+            sid_to_type_id=sid_to_type_id,
+            flip_writer_reader_according_to_type_id=self.flip_reader_writer,
         )
         return example
 

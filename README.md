@@ -39,7 +39,7 @@ For more information, please refer to [the original paper](#reference)
     $ poetry install
     ```
 
-- Log in to [wandb](https://wandb.ai/site).
+- Log in to [wandb](https://wandb.ai/site) (optional).
     ```shell
     $ wandb login
     ```

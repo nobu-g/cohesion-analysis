@@ -3,7 +3,6 @@ import math
 import warnings
 from collections.abc import Mapping
 from pathlib import Path
-from test import save_results
 from typing import Union
 
 import hydra
@@ -18,6 +17,7 @@ from omegaconf import DictConfig, ListConfig, OmegaConf
 
 from datamodule.datamodule import CohesionDataModule
 from modules import CohesionModule
+from test import save_results
 from utils.util import current_datetime_string
 
 hf_logging.set_verbosity(hf_logging.ERROR)

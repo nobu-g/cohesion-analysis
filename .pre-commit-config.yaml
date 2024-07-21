@@ -1,7 +1,7 @@
 ci:
   autofix_prs: true
   autoupdate_schedule: monthly
-  skip: [mypy, shfmt]
+  skip: [mypy, shellcheck, shfmt]
 
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
@@ -12,7 +12,7 @@ repos:
       - id: trailing-whitespace
       - id: check-yaml
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.5.0
+    rev: v0.5.4
     hooks:
       - id: ruff
         args: [ --fix, --exit-non-zero-on-fix ]
@@ -34,7 +34,7 @@ repos:
           - torchmetrics
           - tokenizers==0.19.1
           - transformers==4.40.0
-          - lightning==2.2.2
+          - lightning==2.3.3
         language_version: python3.9
   - repo: https://github.com/jumanjihouse/pre-commit-hooks
     rev: 3.0.0

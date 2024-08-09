@@ -54,7 +54,7 @@ def main(cfg: DictConfig):
     if cfg.checkpoint:
         model.load_from_checkpoint(checkpoint_path=hydra.utils.to_absolute_path(cfg.checkpoint))
     if cfg.compile is True:
-        model = torch.compile(model)  # type: ignore
+        model = torch.compile(model)  # type: ignore[assignment]
 
     # Instantiate lightning loggers
     logger: Union[Logger, bool] = cfg.get("logger", False) and hydra.utils.instantiate(cfg.get("logger"))

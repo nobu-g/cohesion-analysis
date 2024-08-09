@@ -11,7 +11,7 @@ IGNORE_INDEX = -100
 
 
 class CamelCaseDataClassJsonMixin(DataClassJsonMixin):
-    dataclass_json_config = config(letter_case=LetterCase.CAMEL)["dataclasses_json"]  # type: ignore
+    dataclass_json_config = config(letter_case=LetterCase.CAMEL)["dataclasses_json"]
 
 
 def current_datetime_string(fmt: str) -> str:

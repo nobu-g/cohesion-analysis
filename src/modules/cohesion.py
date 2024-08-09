@@ -144,10 +144,10 @@ class CohesionModule(pl.LightningModule):
 
     @rank_zero_only
     def on_train_end(self) -> None:
-        best_model_path: str = self.trainer.checkpoint_callback.best_model_path  # type: ignore
+        best_model_path: str = self.trainer.checkpoint_callback.best_model_path  # type: ignore[union-attr]
         if not best_model_path:
             return
-        save_dir = Path(self.hparams.exp_dir) / self.hparams.run_id  # type: ignore
+        save_dir = Path(self.hparams.exp_dir) / self.hparams.run_id  # type: ignore[attr-defined]
         best_path = save_dir / "best.ckpt"
         if best_path.exists():
             best_path.unlink()

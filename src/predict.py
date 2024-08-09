@@ -39,7 +39,7 @@ class Analyzer:
             checkpoint_path=hydra.utils.to_absolute_path(cfg.checkpoint),
             map_location=self.device,
         )
-        cfg_train: DictConfig = self.model.hparams
+        cfg_train: DictConfig = self.model.hparams  # type: ignore[assignment]
         OmegaConf.set_struct(cfg_train, False)  # enable to add new key-value pairs
         self.cfg = OmegaConf.merge(cfg_train, cfg)
         assert isinstance(self.cfg, DictConfig)

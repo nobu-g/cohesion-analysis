@@ -135,7 +135,7 @@ class CohesionDataset(BaseDataset):
             else:
                 example = self._load_example_from_document(document)
                 if save_cache:
-                    self._save_cache(example, example_cache_path)  # type: ignore
+                    self._save_cache(example, example_cache_path)
             examples.append(example)
         examples = self._post_process_examples(examples)
         if len(examples) == 0:

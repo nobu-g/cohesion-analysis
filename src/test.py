@@ -51,9 +51,9 @@ def main(eval_cfg: DictConfig):
     # Load saved model and config
     model = CohesionModule.load_from_checkpoint(checkpoint_path=hydra.utils.to_absolute_path(eval_cfg.checkpoint))
     if eval_cfg.compile is True:
-        model = torch.compile(model)
+        model = torch.compile(model)  # type: ignore[assignment]
 
-    train_cfg: DictConfig = model.hparams
+    train_cfg: DictConfig = model.hparams  # type: ignore[assignment]
     OmegaConf.set_struct(train_cfg, False)  # enable to add new key-value pairs
     cfg = OmegaConf.merge(train_cfg, eval_cfg)
     assert isinstance(cfg, DictConfig)

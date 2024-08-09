@@ -19,7 +19,7 @@ keywords = [
 [tool.poetry.dependencies]
 python = "^3.9"
 torch = ">=2.1.1"
-transformers = { version = "~4.40.0", extras = ["sentencepiece"] }
+transformers = { version = "~4.43.4", extras = ["sentencepiece"] }
 tokenizers = "^0.19.1"
 lightning = "^2.2"
 torchmetrics = "^1.1"
@@ -29,8 +29,8 @@ rhoknp = { version = "~1.7.0", extras = ["cli"] }
 dataclasses-json = "^0.6.1"
 pandas = "^2.0"
 rich = "^13.3"
-wandb = ">=0.16.0"
-jaconv = "^0.3.4"
+wandb = ">=0.17.0"
+jaconv = "^0.4.0"
 cohesion-tools = "^0.7.1"
 typing-extensions = ">=4.4"
 

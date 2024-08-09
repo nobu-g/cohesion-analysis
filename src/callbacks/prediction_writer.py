@@ -59,7 +59,7 @@ class CohesionWriter(BasePredictionWriter):
         predictions: Sequence[Any],
         batch_indices: Optional[Sequence[Any]] = None,
     ) -> None:
-        dataset: Dataset = trainer.predict_dataloaders.dataset  # type: ignore
+        dataset: Dataset = trainer.predict_dataloaders.dataset  # type: ignore[union-attr]
         assert isinstance(dataset, CohesionDataset)
         orig_did_to_sentences: dict[str, list[Sentence]] = defaultdict(list)
         knp_writer = PredictionKNPWriter(dataset)

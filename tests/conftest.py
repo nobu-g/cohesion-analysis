@@ -20,7 +20,7 @@ DATA_DIR = here / "data"
 os.environ["COHESION_DISABLE_CACHE"] = "1"
 
 
-@pytest.fixture()
+@pytest.fixture
 def fixture_input_tensor():
     # コイン ト ##ス を 行う [NULL] [NA]
     # (b, seq, case, seq) = (1, 7, 4, 7)
@@ -75,48 +75,48 @@ def fixture_input_tensor():
     return input_tensor
 
 
-@pytest.fixture()
+@pytest.fixture
 def fixture_documents_pred():
     return [Document.from_knp(path.read_text()) for path in sorted(DATA_DIR.joinpath("pred").glob("*.knp"))]
 
 
-@pytest.fixture()
+@pytest.fixture
 def fixture_documents_gold():
     return [Document.from_knp(path.read_text()) for path in sorted(DATA_DIR.joinpath("gold").glob("*.knp"))]
 
 
-@pytest.fixture()
+@pytest.fixture
 def fixture_scores():
     with DATA_DIR.joinpath("expected/score/0.json").open() as f:
         yield json.load(f)
 
 
-@pytest.fixture()
+@pytest.fixture
 def exophora_referents() -> list[str]:
     return ["著者", "読者", "不特定:人", "不特定:物"]
 
 
-@pytest.fixture()
+@pytest.fixture
 def pas_cases() -> list[str]:
     return ["ガ", "ヲ", "ニ", "ガ２"]
 
 
-@pytest.fixture()
+@pytest.fixture
 def bar_rels() -> list[str]:
     return ["ノ"]
 
 
-@pytest.fixture()
+@pytest.fixture
 def special_tokens(exophora_referents: list[str]) -> list[str]:
     return [*[f"[{er}]" for er in exophora_referents], "[NULL]", "[NA]"]
 
 
-@pytest.fixture()
+@pytest.fixture
 def tokenizer(special_tokens: list[str]) -> PreTrainedTokenizerBase:
     return AutoTokenizer.from_pretrained("ku-nlp/deberta-v2-tiny-japanese", additional_special_tokens=special_tokens)
 
 
-@pytest.fixture()
+@pytest.fixture
 def fixture_train_dataset(
     pas_cases: list[str],
     bar_rels: list[str],
@@ -139,7 +139,7 @@ def fixture_train_dataset(
     return dataset
 
 
-@pytest.fixture()
+@pytest.fixture
 def fixture_eval_dataset(
     pas_cases: list[str],
     bar_rels: list[str],
@@ -162,7 +162,7 @@ def fixture_eval_dataset(
     return dataset
 
 
-@pytest.fixture()
+@pytest.fixture
 def fixture_example1():
     with DATA_DIR.joinpath("expected/example/1.json").open() as f:
         yield json.load(f)

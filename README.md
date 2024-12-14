@@ -178,7 +178,8 @@ poetry run python scripts/train.py -cn debug devices=[0]
 
 ## Reference
 
-[BERT-based Cohesion Analysis of Japanese Texts](https://www.aclweb.org/anthology/2020.coling-main.114/) [Ueda+, COLING2020]
+- [BERT-based Cohesion Analysis of Japanese Texts](https://www.aclweb.org/anthology/2020.coling-main.114/) [Ueda et al., COLING, 2020]
+- [BERTに基づく統合的日本語結束性解析](https://nobu-g.github.io/pub/master_thesis_2021.pdf) [植田, master thesis, 2021]
 
 ## Author
 
